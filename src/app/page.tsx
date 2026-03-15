@@ -1,5 +1,6 @@
 import SearchFilters from "@/components/dashboard/SearchFilters";
 import KpiGrid from "@/components/dashboard/KpiGrid";
+import MainMapSection from "@/components/dashboard/MainMapSection";
 
 export default function DashboardPage() {
   return (
@@ -7,6 +8,7 @@ export default function DashboardPage() {
       <section className="space-y-6">
         <SearchFilters />
         <KpiGrid />
+        <MainMapSection />
       </section>
     </div>
   );
