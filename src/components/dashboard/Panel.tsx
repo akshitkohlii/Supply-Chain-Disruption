@@ -13,6 +13,7 @@ export default function Panel({ title, children, className = "" }: PanelProps) {
         <h2 className="text-sm md:text-base font-semibold tracking-wide text-slate-100">
           {title}
         </h2>
+        <div className="h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.7)]" />
       </div>
 
       <div className="p-4">{children}</div>
