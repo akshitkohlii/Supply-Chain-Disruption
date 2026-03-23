@@ -6,9 +6,16 @@ import MiniStat from "./ui/MiniStat";
 import WorldRiskMap from "./WorldriskMap";
 import type { AlertItem } from "@/lib/dashboard-data";
 import { emergingSignals } from "@/lib/dashboard-data";
+import { AnimatePresence, motion } from "framer-motion";
 
+type LayerFilter =
+  | "all"
+  | "supplier"
+  | "port"
+  | "climate"
+  | "geo"
+  | "logistics";
 
-type LayerFilter = "all" | "supplier" | "port" | "climate" | "geo" | "logistics";
 type LevelFilter = "all" | "stable" | "warning" | "critical";
 
 type MainMapSectionProps = {
@@ -19,6 +26,8 @@ type MainMapSectionProps = {
   onLayerChange: (layer: LayerFilter) => void;
   activeLevel: LevelFilter;
   onLevelChange: (level: LevelFilter) => void;
+  onAcknowledge: (id: string) => void;
+  onResolve: (id: string) => void;
 };
 
 export default function MainMapSection({
@@ -29,12 +38,14 @@ export default function MainMapSection({
   onLayerChange,
   activeLevel,
   onLevelChange,
+  onAcknowledge,
+  onResolve,
 }: MainMapSectionProps) {
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
       <Panel title="Global Disruption Risk Map" className="xl:col-span-8">
-        <div className="h-135 rounded-2xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(9,14,25,0.95))] flex flex-col p-4 gap-3">
-          <div className="relative z-20 flex gap-2 flex-wrap">
+        <div className="flex h-135 flex-col gap-3 rounded-2xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(9,14,25,0.95))] p-4">
+          <div className="relative z-20 flex flex-wrap gap-2">
             <LayerChip
               label="All"
               active={activeLayer === "all"}
@@ -67,7 +78,7 @@ export default function MainMapSection({
             />
           </div>
 
-          <div className="relative z-0 flex-1 min-h-0 rounded-2xl overflow-hidden">
+          <div className="relative z-0 min-h-0 flex-1 overflow-hidden rounded-2xl">
             <WorldRiskMap
               alerts={alerts}
               selectedAlertId={selectedAlert?.id ?? null}
@@ -75,7 +86,7 @@ export default function MainMapSection({
             />
           </div>
 
-          <div className="relative z-20 flex gap-3 flex-wrap">
+          <div className="relative z-20 flex flex-wrap gap-3">
             <Legend
               color="bg-cyan-400"
               label="Stable"
@@ -104,32 +115,44 @@ export default function MainMapSection({
         </div>
       </Panel>
 
-      <div className="xl:col-span-4 space-y-4">
+      <div className="space-y-4 xl:col-span-4">
         <Panel title="Live Alerts Feed">
-          <div className="h-55 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-            {alerts.map((alert) => (
-              <AlertRow
-                key={alert.id}
-                alert={alert}
-                active={selectedAlert?.id === alert.id}
-                onClick={() => onSelectAlert(alert)}
-              />
-            ))}
+          <div className="custom-scrollbar h-55 space-y-3 overflow-y-auto pr-1">
+            <AnimatePresence mode="popLayout">
+              {alerts.map((alert) => (
+                <motion.div
+                  key={alert.id}
+                  layout
+                  initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, x: 24, scale: 0.96, height: 0, marginBottom: 0 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                >
+                  <AlertRow
+                    alert={alert}
+                    active={selectedAlert?.id === alert.id}
+                    onClick={() => onSelectAlert(alert)}
+                    onAcknowledge={onAcknowledge}
+                    onResolve={onResolve}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         </Panel>
 
         <Panel title="Emerging Risk Signals">
-  <div className="grid grid-cols-2 gap-3">
-    {emergingSignals.map((signal) => (
-      <MiniStat
-        key={signal.id}
-        label={signal.label}
-        value={signal.value}
-        trend={signal.trend}
-      />
-    ))}
-  </div>
-</Panel>
+          <div className="grid grid-cols-2 gap-3">
+            {emergingSignals.map((signal) => (
+              <MiniStat
+                key={signal.id}
+                label={signal.label}
+                value={signal.value}
+                trend={signal.trend}
+              />
+            ))}
+          </div>
+        </Panel>
       </div>
     </div>
   );

@@ -1,16 +1,30 @@
 "use client";
 
-import { useState } from "react";
 import { Search } from "lucide-react";
 import GlassBox from "./GlassBox";
 import FilterBox from "./ui/FilterBox";
 
-export default function SearchFilters() {
-  const [search, setSearch] = useState("");
-  const [region, setRegion] = useState("All Regions");
-  const [businessUnit, setBusinessUnit] = useState("Global Ops");
-  const [riskLevel, setRiskLevel] = useState("All Levels");
+type SearchFiltersProps = {
+  search: string;
+  onSearchChange: (value: string) => void;
+  region: string;
+  onRegionChange: (value: string) => void;
+  businessUnit: string;
+  onBusinessUnitChange: (value: string) => void;
+  riskLevel: string;
+  onRiskLevelChange: (value: string) => void;
+};
 
+export default function SearchFilters({
+  search,
+  onSearchChange,
+  region,
+  onRegionChange,
+  businessUnit,
+  onBusinessUnitChange,
+  riskLevel,
+  onRiskLevelChange,
+}: SearchFiltersProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-[1.3fr_repeat(3,minmax(0,1fr))] gap-4">
       <GlassBox className="h-14 px-4 flex items-center gap-3">
@@ -18,7 +32,7 @@ export default function SearchFilters() {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search supplier, route, port, alert..."
           className="w-full bg-transparent text-sm text-slate-200 placeholder:text-slate-500 outline-none"
         />
@@ -27,22 +41,28 @@ export default function SearchFilters() {
       <FilterBox
         label="Region"
         value={region}
-        options={["All Regions", "Asia", "Europe", "North America", "Middle East"]}
-        onChange={setRegion}
+        options={[
+          "All Regions",
+          "Asia",
+          "Europe",
+          "North America",
+          "South America",
+        ]}
+        onChange={onRegionChange}
       />
 
       <FilterBox
         label="Business Unit"
         value={businessUnit}
-        options={["Global Ops", "Logistics", "Risk"]}
-        onChange={setBusinessUnit}
+        options={["All Units", "Global Ops", "Logistics", "Risk"]}
+        onChange={onBusinessUnitChange}
       />
 
       <FilterBox
         label="Risk Level"
         value={riskLevel}
-        options={["All Levels", "Low", "Medium", "High", "Critical"]}
-        onChange={setRiskLevel}
+        options={["All Levels", "Stable", "Warning", "Critical"]}
+        onChange={onRiskLevelChange}
       />
     </div>
   );

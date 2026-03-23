@@ -6,6 +6,8 @@ type KpiCardProps = {
   change: string;
   trend: "up" | "down" | "neutral";
   series: number[];
+  active?: boolean;
+  onClick?: () => void;
 };
 
 function Sparkline({
@@ -24,14 +26,14 @@ function Sparkline({
       ? "stroke-rose-400"
       : trend === "down"
       ? "stroke-emerald-400"
-      : "stroke-cyan-400";
+      : "stroke-slate-300";
 
   const fillClass =
     trend === "up"
       ? "fill-rose-500/10"
       : trend === "down"
       ? "fill-emerald-500/10"
-      : "fill-cyan-500/10";
+      : "fill-slate-400/10";
 
   const points = series
     .map((value, i) => {
@@ -54,7 +56,7 @@ function Sparkline({
         <polyline
           points={points}
           fill="none"
-          className={`${strokeClass}`}
+          className={strokeClass}
           strokeWidth="3"
           vectorEffect="non-scaling-stroke"
           strokeLinecap="round"
@@ -71,32 +73,37 @@ export default function KpiCard({
   change,
   trend,
   series,
+  active = false,
+  onClick,
 }: KpiCardProps) {
   const trendColor =
     trend === "up"
       ? "text-rose-400"
       : trend === "down"
       ? "text-emerald-400"
-      : "text-cyan-400";
+      : "text-slate-300";
 
   const glowClass =
     trend === "up"
       ? "from-rose-500/15 via-orange-500/5 to-transparent"
       : trend === "down"
-      ? "from-emerald-500/15 via-cyan-500/5 to-transparent"
-      : "from-cyan-500/15 via-blue-500/5 to-transparent";
-
-  const dotClass =
-    trend === "up"
-      ? "bg-rose-400"
-      : trend === "down"
-      ? "bg-emerald-400"
-      : "bg-cyan-400";
+      ? "from-emerald-500/15 via-lime-500/5 to-transparent"
+      : "from-slate-500/15 via-slate-400/5 to-transparent";
 
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-950/80 p-3 backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-700 hover:shadow-[0_0_0_1px_rgba(51,65,85,0.35),0_10px_30px_rgba(2,6,23,0.45)]">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group relative w-full overflow-hidden rounded-xl border p-3 text-left backdrop-blur-xl transition-all duration-300 active:scale-[0.99] ${
+        active
+          ? "border-indigo-400/30 bg-indigo-500/5 shadow-[0_0_0_1px_rgba(129,140,248,0.18),0_10px_30px_rgba(2,6,23,0.45)]"
+          : "border-slate-800/80 bg-slate-950/80 hover:-translate-y-0.5 hover:border-slate-700 hover:shadow-[0_0_0_1px_rgba(51,65,85,0.35),0_10px_30px_rgba(2,6,23,0.45)]"
+      }`}
+    >
       <div
-        className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${glowClass} opacity-70`}
+        className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${glowClass} ${
+          active ? "opacity-90" : "opacity-70"
+        }`}
       />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
 
@@ -116,23 +123,20 @@ export default function KpiCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/80 px-2 py-1">
-            <span className={`h-2 w-2 rounded-full ${dotClass} animate-pulse`} />
-            <span className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
-              Live
+          {active && (
+            <span className="rounded-full border border-indigo-400/20 bg-indigo-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-indigo-200">
+              Active
             </span>
-          </div>
+          )}
         </div>
 
         <Sparkline series={series} trend={trend} />
 
         <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-slate-500">
           <span>Last 8 intervals</span>
-          <span className="text-slate-400 group-hover:text-slate-300">
-            Terminal feed
-          </span>
+          <span>{active ? "Filtering" : "Click to filter"}</span>
         </div>
       </div>
-    </div>
+    </button>
   );
 }

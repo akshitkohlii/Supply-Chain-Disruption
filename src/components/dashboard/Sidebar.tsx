@@ -3,14 +3,14 @@ import { navItems } from "@/lib/dashboard-data";
 
 export default function Sidebar() {
   return (
-    <aside className="hidden lg:flex w-20 hover:w-64 transition-all duration-300 group border-r border-slate-800/80 bg-slate-950/70 backdrop-blur-xl flex-col">
-      <div className="h-20 flex items-center justify-center">
+    <aside className="peer group hidden lg:flex fixed top-0 left-0 z-40 h-screen w-20 hover:w-64 transition-all duration-300 border-r border-slate-800/80 bg-slate-950/70 backdrop-blur-xl flex-col overflow-hidden">
+      <div className="h-20 flex items-center">
         <div className="flex items-center gap-3 px-4 w-full">
-          <div className="h-11 w-11 flex items-center justify-center ">
+          <div className="h-11 w-11 flex items-center justify-center shrink-0">
             <Bird className="h-5 w-5 text-cyan-300" />
           </div>
 
-          <div className="hidden group-hover:block overflow-hidden">
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 overflow-hidden">
             <div className="text-sm font-semibold tracking-wide text-white whitespace-nowrap">
               SCDEWS
             </div>
@@ -18,7 +18,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-2">
+      <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto">
         {navItems.map((item, index) => {
           const Icon = item.icon;
           const active = index === 0;
@@ -33,7 +33,7 @@ export default function Sidebar() {
               }`}
             >
               <Icon className="h-5 w-5 shrink-0" />
-              <span className="hidden group-hover:block text-sm whitespace-nowrap">
+              <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-sm whitespace-nowrap">
                 {item.label}
               </span>
             </button>

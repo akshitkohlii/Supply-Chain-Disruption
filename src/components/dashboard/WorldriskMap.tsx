@@ -50,8 +50,7 @@ export default function WorldRiskMap({
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style:
-        "https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json",
+       style: "/map-styles/dark-matter-nolabels.json",
       center: [20, 20],
       zoom: 0.7,
       minZoom: 0.5,
