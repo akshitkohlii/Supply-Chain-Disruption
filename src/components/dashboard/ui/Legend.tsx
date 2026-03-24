@@ -1,3 +1,4 @@
+
 type LegendProps = {
   color: string;
   label: string;

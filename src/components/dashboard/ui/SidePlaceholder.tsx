@@ -1,3 +1,4 @@
+
 export default function SidePlaceholder() {
   return (
     <div className="space-y-4">

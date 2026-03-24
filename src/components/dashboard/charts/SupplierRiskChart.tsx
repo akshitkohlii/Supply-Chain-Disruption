@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useMemo, useState } from "react";
@@ -89,7 +90,7 @@ function FooterAxis() {
   const ticks = [0, 25, 50, 75, 100];
 
   return (
-    <div className="pl-[58px] pr-3">
+    <div className="pl-14.5 pr-3">
       <div className="relative h-6">
         <div className="absolute left-0 right-0 top-2 border-t border-slate-800/70" />
         {ticks.map((tick) => (

@@ -1,3 +1,4 @@
+
 import Panel from "./Panel";
 import SupplierRiskChart from "./charts/SupplierRiskChart";
 import LogisticsTransportChart from "./charts/LogisticTransportChart";
@@ -8,7 +9,7 @@ export default function MidCardsSection() {
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
       <Panel
         title="Supplier Risk & Dependency"
-        className="xl:col-span-4 h-[400px]"
+        className="xl:col-span-4 h-100"
         bodyClassName="min-h-0"
       >
         <SupplierRiskChart />
@@ -16,7 +17,7 @@ export default function MidCardsSection() {
 
       <Panel
         title="Logistics & Transportation"
-        className="xl:col-span-4 h-[400px]"
+        className="xl:col-span-4 h-100"
         bodyClassName="min-h-0"
       >
         <LogisticsTransportChart />
@@ -24,7 +25,7 @@ export default function MidCardsSection() {
 
       <Panel
         title="Predictive Risk Analytics"
-        className="xl:col-span-4 h-[400px]"
+        className="xl:col-span-4 h-100"
         bodyClassName="min-h-0"
       >
         <PredictiveRiskChart />

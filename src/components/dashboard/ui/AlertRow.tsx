@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { AlertItem } from "@/lib/dashboard-data";
@@ -14,7 +15,7 @@ type AlertRowProps = {
 function getLevelDot(level: AlertItem["level"]) {
   if (level === "critical") return "bg-rose-400";
   if (level === "warning") return "bg-amber-400";
-  return "bg-emerald-400";
+  return "bg-cyan-400";
 }
 
 export default function AlertRow({

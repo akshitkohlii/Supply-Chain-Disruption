@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { MitigationRecommendation } from "@/lib/dashboard-data";

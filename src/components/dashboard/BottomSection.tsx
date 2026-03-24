@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -83,7 +84,7 @@ export default function BottomSection({
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
       <Panel
         title="Mitigation Scenario Comparison"
-        className="xl:col-span-7 h-[760px]"
+        className="xl:col-span-7 h-180"
         bodyClassName="h-[calc(100%-65px)]"
       >
         <MitigationScenarioComparison recommendation={selectedRecommendation} />
@@ -91,7 +92,7 @@ export default function BottomSection({
 
       <Panel
         title="AI Mitigation & Recommendation Engine"
-        className="xl:col-span-5 h-[760px]"
+        className="xl:col-span-5 h-180"
         bodyClassName="h-[calc(100%-65px)] overflow-y-auto pr-2 custom-scrollbar"
       >
         <AIMitigationEngine

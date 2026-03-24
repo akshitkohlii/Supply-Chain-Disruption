@@ -1,12 +1,20 @@
 import {
-  PanelLeft,
-  Settings,
+  LayoutGrid,
+  Factory,
   Truck,
+  LineChart,
+  Settings,
 } from "lucide-react";
 
 export const navItems = [
-  { label: "Overview", icon: PanelLeft },
-  { label: "Logistics", icon: Truck },
+  { label: "Overview", icon: LayoutGrid, href: "/" },
+  { label: "Suppliers", icon: Factory, href: "/suppliers" },
+  { label: "Logistics", icon: Truck, href: "/logistics" },
+  { label: "Analytics", icon: LineChart, href: "/analytics" },
+  { label: "Settings", icon: Settings, href: "/settings" },
+];
+
+export const utilityNavItems = [
   { label: "Settings", icon: Settings },
 ];
 
@@ -95,85 +103,101 @@ export const alerts: AlertItem[] = [
   },
 ];
 
-export type KpiTrend = "up" | "down" | "neutral";
+export type KpiRisk = "low" | "medium" | "high";
 
 export type KpiItem = {
   title: string;
   value: string;
   change: string;
-  trend: KpiTrend;
+  changeValue: number;
+  changeLabel: string;
+  trend: "up" | "down" | "neutral";
+  risk: KpiRisk;
   series: number[];
 };
 
-export function buildKpisFromAlerts(alerts: AlertItem[]): KpiItem[] {
-  const criticalAlerts = alerts.filter((a) => a.level === "critical").length;
-  const warningAlerts = alerts.filter((a) => a.level === "warning").length;
-  const totalAlerts = alerts.length;
+export const dashboardKpis: KpiItem[] = [
+  {
+    title: "Global Risk Score",
+    value: "72",
+    change: "+3.2%",
+    changeValue: 3.2,
+    changeLabel: "vs last week",
+    trend: "up",
+    risk: "high",
+    series: [61, 64, 66, 68, 67, 69, 71, 72],
+  },
+  {
+    title: "Critical Alerts",
+    value: "1",
+    change: "+0",
+    changeValue: 0,
+    changeLabel: "active criticals",
+    trend: "neutral",
+    risk: "medium",
+    series: [0, 1, 1, 2, 1, 1, 1, 1],
+  },
+  {
+    title: "High-Risk Suppliers",
+    value: "14",
+    change: "+2",
+    changeValue: 2,
+    changeLabel: "vs last month",
+    trend: "up",
+    risk: "medium",
+    series: [10, 11, 11, 12, 12, 13, 13, 14],
+  },
+  {
+    title: "Delayed Shipments %",
+    value: "18%",
+    change: "-1.5%",
+    changeValue: -1.5,
+    changeLabel: "vs yesterday",
+    trend: "down",
+    risk: "medium",
+    series: [23, 22, 21, 20, 20, 19, 18.5, 18],
+  },
+  {
+    title: "Avg Time to Recover",
+    value: "4.2 days",
+    change: "-0.4d",
+    changeValue: -0.4,
+    changeLabel: "vs last month",
+    trend: "down",
+    risk: "low",
+    series: [5.4, 5.1, 4.9, 4.8, 4.6, 4.5, 4.3, 4.2],
+  },
+];
 
-  const globalRiskScore = Math.min(
-    100,
-    Math.round(criticalAlerts * 40 + warningAlerts * 20 + totalAlerts * 5)
-  );
+function getRiskFromCount(
+  count: number,
+  highThreshold = 4,
+  mediumThreshold = 2
+): KpiRisk {
+  if (count >= highThreshold) return "high";
+  if (count >= mediumThreshold) return "medium";
+  return "low";
+}
 
-  const highRiskSuppliers = alerts.filter(
-    (a) =>
-      (a.category === "supplier" || a.category === "geo") &&
-      (a.level === "warning" || a.level === "critical")
+export function buildDashboardKpis(alerts: AlertItem[]): KpiItem[] {
+  const criticalAlerts = alerts.filter(
+    (a) => a.level === "critical" && a.status === "active"
   ).length;
 
-  const delaySignals = alerts.filter(
-    (a) => a.category === "logistics" || a.category === "port"
-  ).length;
+  return dashboardKpis.map((kpi) => {
+    if (kpi.title !== "Critical Alerts") return kpi;
 
-  const delayedShipmentPercent =
-    totalAlerts === 0
-      ? 0
-      : Math.min(
-          100,
-          Math.round((delaySignals / totalAlerts) * 100 + warningAlerts * 3)
-        );
-
-  const avgRecoveryDays = (
-    2 + criticalAlerts * 1.5 + warningAlerts * 0.7
-  ).toFixed(1);
-
-  return [
-    {
-      title: "Global Risk Score",
-      value: `${globalRiskScore}`,
-      change: `${criticalAlerts} critical`,
-      trend: "up",
-      series: [48, 52, 57, 61, 66, 72, 78, globalRiskScore],
-    },
-    {
-      title: "Critical Alerts",
+    return {
+      ...kpi,
       value: `${criticalAlerts}`,
-      change: `${warningAlerts} warning`,
+      change: criticalAlerts > 0 ? `+${criticalAlerts}` : "+0",
+      changeValue: criticalAlerts,
+      changeLabel: "active criticals",
       trend: criticalAlerts > 0 ? "up" : "neutral",
+      risk: getRiskFromCount(criticalAlerts, 3, 1),
       series: [0, 0, 1, 1, 2, 1, 1, criticalAlerts],
-    },
-    {
-      title: "High-Risk Suppliers",
-      value: `${highRiskSuppliers}`,
-      change: "Supplier instability",
-      trend: highRiskSuppliers > 0 ? "up" : "neutral",
-      series: [0, 1, 1, 2, 2, 2, 1, highRiskSuppliers],
-    },
-    {
-      title: "Delayed Shipments %",
-      value: `${delayedShipmentPercent}%`,
-      change: "Logistics slowdown",
-      trend: delayedShipmentPercent > 20 ? "up" : "neutral",
-      series: [11, 13, 14, 16, 18, 20, 23, delayedShipmentPercent],
-    },
-    {
-      title: "Avg Time to Recover",
-      value: `${avgRecoveryDays} days`,
-      change: "Estimated",
-      trend: "up",
-      series: [2.1, 2.4, 2.8, 3.0, 3.4, 3.6, 3.9, Number(avgRecoveryDays)],
-    },
-  ];
+    };
+  });
 }
 
 export type EmergingSignal = {
@@ -429,3 +453,5 @@ export const mitigationRecommendations: MitigationRecommendation[] = [
     ],
   },
 ];
+
+

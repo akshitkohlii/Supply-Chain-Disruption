@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -48,7 +49,7 @@ function RadarTooltip({ active, payload, label }: RadarTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
   return (
-    <div className="min-w-[120px] rounded-xl border border-slate-700/80 bg-slate-950/96 px-2.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+    <div className="min-w-30 rounded-xl border border-slate-700/80 bg-slate-950/96 px-2.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
       <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
         {label}
       </div>
@@ -80,7 +81,7 @@ export default function MitigationRadarChart({
   data,
 }: MitigationRadarChartProps) {
   return (
-    <div className="h-[220px] w-full">
+    <div className="h-55 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <RadarChart
           data={data}

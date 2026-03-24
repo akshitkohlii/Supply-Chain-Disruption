@@ -26,8 +26,8 @@ export default function SearchFilters({
   onRiskLevelChange,
 }: SearchFiltersProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[1.3fr_repeat(3,minmax(0,1fr))] gap-4">
-      <GlassBox className="h-14 px-4 flex items-center gap-3">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.3fr_repeat(3,minmax(0,1fr))]">
+      <GlassBox className="flex h-14 items-center gap-3 px-4">
         <Search className="h-4 w-4 text-slate-500" />
         <input
           type="text"

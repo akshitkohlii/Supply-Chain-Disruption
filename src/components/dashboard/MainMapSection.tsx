@@ -1,12 +1,15 @@
+import { memo } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+
 import Panel from "./Panel";
 import LayerChip from "./ui/LayerChip";
 import Legend from "./ui/Legend";
 import AlertRow from "./ui/AlertRow";
 import MiniStat from "./ui/MiniStat";
 import WorldRiskMap from "./WorldriskMap";
+
 import type { AlertItem } from "@/lib/dashboard-data";
 import { emergingSignals } from "@/lib/dashboard-data";
-import { AnimatePresence, motion } from "framer-motion";
 
 type LayerFilter =
   | "all"
@@ -30,7 +33,7 @@ type MainMapSectionProps = {
   onResolve: (id: string) => void;
 };
 
-export default function MainMapSection({
+function MainMapSection({
   alerts,
   selectedAlert,
   onSelectAlert,
@@ -44,7 +47,7 @@ export default function MainMapSection({
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
       <Panel title="Global Disruption Risk Map" className="xl:col-span-8">
-        <div className="flex h-135 flex-col gap-3 rounded-2xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(9,14,25,0.95))] p-4">
+        <div className="flex h-130 flex-col gap-3 rounded-2xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(9,14,25,0.95))] p-4">
           <div className="relative z-20 flex flex-wrap gap-2">
             <LayerChip
               label="All"
@@ -157,3 +160,5 @@ export default function MainMapSection({
     </div>
   );
 }
+
+export default memo(MainMapSection);

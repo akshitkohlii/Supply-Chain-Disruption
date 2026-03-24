@@ -1,3 +1,4 @@
+
 "use client";
 
 type TooltipEntry = {
@@ -49,7 +50,7 @@ export default function ChartTooltip({
   const title = labelPrefix ? `${labelPrefix} ${label}` : label;
 
   return (
-    <div className="min-w-[120px] rounded-xl border border-slate-700/80 bg-slate-950/96 px-2.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+    <div className="min-w-30 rounded-xl border border-slate-700/80 bg-slate-950/96 px-2.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
       {title ? (
         <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
           {title}

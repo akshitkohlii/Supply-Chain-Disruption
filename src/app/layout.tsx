@@ -8,13 +8,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-slate-950 text-white antialiased overflow-hidden">
-        <div className="h-screen bg-[radial-gradient(circle_at_top,#162033_0%,#0b1220_45%,#070b14_100%)]">
+      <body className="h-screen overflow-hidden bg-slate-950 text-white antialiased">
+        <div className="flex h-screen bg-[radial-gradient(circle_at_top,#162033_0%,#0b1220_45%,#070b14_100%)]">
           <Sidebar />
-
-          <div className="h-screen lg:ml-20 lg:peer-hover:ml-64 transition-all duration-300">
+          <main className="min-w-0 flex-1 overflow-hidden">
             {children}
-          </div>
+          </main>
         </div>
       </body>
     </html>

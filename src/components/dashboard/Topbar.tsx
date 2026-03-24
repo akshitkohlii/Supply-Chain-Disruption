@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useMemo, useState } from "react";
@@ -44,7 +45,7 @@ export default function Topbar({
   );
 
   return (
-    <header className="h-20 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-xl">
+    <header className="h-20 border-b border-slate-800/80 bg-slate-950/75 backdrop-blur-xl">
       <div className="flex h-full items-center justify-between gap-4 px-4 md:px-6">
         <div className="flex min-w-0 items-center gap-4">
           <div className="min-w-0">
@@ -86,14 +87,14 @@ export default function Topbar({
               <Bell className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
 
               {activeNotifications.length > 0 && (
-                <span className="absolute -right-1 -top-1 h-[18px] min-w-[18px] rounded-full bg-rose-500 px-1 text-center text-[10px] font-semibold leading-[18px] text-white">
+                <span className="absolute -right-1 -top-1 h-4.5 min-w-4.5 rounded-full bg-rose-500 px-1 text-center text-[10px] font-semibold leading-4.5 text-white">
                   {activeNotifications.length}
                 </span>
               )}
             </button>
 
             {open && (
-              <div className="absolute right-0 z-50 mt-3 w-[380px] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/95 shadow-[0_20px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+              <div className="absolute right-0 z-50 mt-3 w-95 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/95 shadow-[0_20px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl">
                 <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
                   <div>
                     <h3 className="text-sm font-semibold text-white">
@@ -113,7 +114,7 @@ export default function Topbar({
                   </button>
                 </div>
 
-                <div className="max-h-[360px] overflow-y-auto p-2">
+                <div className="max-h-90 overflow-y-auto p-2">
                   {activeNotifications.length > 0 ? (
                     <div className="space-y-2">
                       {activeNotifications.map((alert) => (

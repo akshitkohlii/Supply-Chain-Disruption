@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { AlertItem } from "@/lib/dashboard-data";
@@ -15,7 +15,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-export default function WorldRiskMap({
+function WorldRiskMap({
   alerts,
   selectedAlertId,
   onSelectAlert,
@@ -50,7 +50,7 @@ export default function WorldRiskMap({
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-       style: "/map-styles/dark-matter-nolabels.json",
+      style: "/map-styles/dark-matter-nolabels.json",
       center: [20, 20],
       zoom: 0.7,
       minZoom: 0.5,
@@ -244,71 +244,70 @@ export default function WorldRiskMap({
   }, [geoJson, selectedAlertId]);
 
   return (
-    <div className="relative h-full w-full rounded-2xl overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden rounded-2xl">
       <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />
       <div className="pointer-events-none absolute inset-0 z-10 rounded-2xl border border-dashed border-slate-700/80" />
 
       <style jsx global>{`
-  .maplibregl-map,
-  .maplibregl-canvas-container,
-  .maplibregl-canvas {
-    width: 100%;
-    height: 100%;
-  }
+        .maplibregl-map,
+        .maplibregl-canvas-container,
+        .maplibregl-canvas {
+          width: 100%;
+          height: 100%;
+        }
 
-  .maplibregl-ctrl-top-right {
-    top: 12px;
-    right: 12px;
-    z-index: 20;
-  }
+        .maplibregl-ctrl-top-right {
+          top: 12px;
+          right: 12px;
+          z-index: 20;
+        }
 
-  .maplibregl-ctrl-group {
-    background: rgba(15, 23, 42, 0.96) !important;
-    border: 1px solid rgba(51, 65, 85, 0.95) !important;
-    border-radius: 14px !important;
-    overflow: hidden;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  }
+        .maplibregl-ctrl-group {
+          background: rgba(15, 23, 42, 0.96) !important;
+          border: 1px solid rgba(51, 65, 85, 0.95) !important;
+          border-radius: 14px !important;
+          overflow: hidden;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
 
-  .maplibregl-ctrl-group button {
-    width: 36px !important;
-    height: 36px !important;
-    background: transparent !important;
-  }
+        .maplibregl-ctrl-group button {
+          width: 36px !important;
+          height: 36px !important;
+          background: transparent !important;
+        }
 
-  .maplibregl-ctrl-group button:hover {
-    background: rgba(56, 189, 248, 0.12) !important;
-  }
+        .maplibregl-ctrl-group button:hover {
+          background: rgba(56, 189, 248, 0.12) !important;
+        }
 
-  /* THIS is the actual visible icon */
-  .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
-    opacity: 1 !important;
-    filter: brightness(0) saturate(100%) invert(88%) sepia(9%) saturate(414%)
-      hue-rotate(182deg) brightness(94%) contrast(89%) !important;
-  }
+        .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+          opacity: 1 !important;
+          filter: brightness(0) saturate(100%) invert(88%) sepia(9%) saturate(414%)
+            hue-rotate(182deg) brightness(94%) contrast(89%) !important;
+        }
 
-  /* zoom in = cyan */
-  .maplibregl-ctrl-group .maplibregl-ctrl-zoom-in .maplibregl-ctrl-icon {
-    filter: brightness(0) saturate(100%) invert(80%) sepia(32%) saturate(1089%)
-      hue-rotate(154deg) brightness(99%) contrast(92%) !important;
-  }
+        .maplibregl-ctrl-group .maplibregl-ctrl-zoom-in .maplibregl-ctrl-icon {
+          filter: brightness(0) saturate(100%) invert(80%) sepia(32%) saturate(1089%)
+            hue-rotate(154deg) brightness(99%) contrast(92%) !important;
+        }
 
-  /* zoom out = amber */
-  .maplibregl-ctrl-group .maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon {
-    filter: brightness(0) saturate(100%) invert(83%) sepia(36%) saturate(1544%)
-      hue-rotate(344deg) brightness(101%) contrast(96%) !important;
-  }
+        .maplibregl-ctrl-group .maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon {
+          filter: brightness(0) saturate(100%) invert(83%) sepia(36%) saturate(1544%)
+            hue-rotate(344deg) brightness(101%) contrast(96%) !important;
+        }
 
-  .maplibregl-ctrl-group button:hover .maplibregl-ctrl-icon {
-    transform: scale(1.04);
-  }
+        .maplibregl-ctrl-group button:hover .maplibregl-ctrl-icon {
+          transform: scale(1.04);
+        }
 
-  .maplibregl-popup-content {
-    border-radius: 12px;
-    padding: 0;
-    overflow: hidden;
-  }
-`}</style>
+        .maplibregl-popup-content {
+          border-radius: 12px;
+          padding: 0;
+          overflow: hidden;
+        }
+      `}</style>
     </div>
   );
 }
+
+export default memo(WorldRiskMap);

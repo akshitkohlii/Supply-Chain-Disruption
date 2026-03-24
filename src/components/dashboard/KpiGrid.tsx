@@ -5,15 +5,9 @@ import type { KpiItem } from "@/lib/dashboard-data";
 
 type KpiGridProps = {
   kpis: KpiItem[];
-  activeKpi: string | null;
-  onKpiClick: (title: string) => void;
 };
 
-export default function KpiGrid({
-  kpis,
-  activeKpi,
-  onKpiClick,
-}: KpiGridProps) {
+export default function KpiGrid({ kpis }: KpiGridProps) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
       {kpis.map((kpi) => (
@@ -23,9 +17,7 @@ export default function KpiGrid({
           value={kpi.value}
           change={kpi.change}
           trend={kpi.trend}
-          series={kpi.series}
-          active={activeKpi === kpi.title}
-          onClick={() => onKpiClick(kpi.title)}
+          risk={kpi.risk}
         />
       ))}
     </div>
