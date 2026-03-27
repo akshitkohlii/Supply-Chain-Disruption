@@ -1,7 +1,7 @@
 import os
 
 # ===== CONFIG =====
-SOURCE_DIR = "/Users/mohitkumar/Desktop/supplychain/src"   # change this
+SOURCE_DIR = "/Users/mohitkumar/Desktop/supplychain/frontend"   # change this
 OUTPUT_FILE = "project_dump.txt"
 
 # File extensions to skip (binary / unnecessary)
