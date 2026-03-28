@@ -1,8 +1,6 @@
-
 # OS
 .DS_Store
 Thumbs.db
-
 
 # Node / Frontend
 frontend/node_modules/
@@ -26,12 +24,10 @@ yarn-error.log*
 .pnpm-debug.log*
 *.log
 
-
 # Next.js / Build Cache
 .next/
 out/
 build/
-
 
 # Python / Backend
 backend/venv/
@@ -41,31 +37,26 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Python envs (extra safety)
+# Python envs
 .env/
 .venv/
-
+venv/
 
 # Environment files
 .env*
 backend/.env
 frontend/.env.local
 
-
 # IDE / Editor
 .vscode/
 .idea/
 
-
 # Coverage / Testing
 coverage/
-
 
 # Deployment
 .vercel
 
-
-# Data (optional control)
+# Data
 backend/data/processed/
-
 # backend/data/raw/

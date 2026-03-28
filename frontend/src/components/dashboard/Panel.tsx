@@ -1,9 +1,9 @@
-
 type PanelProps = {
   title: string;
   children: React.ReactNode;
   className?: string;
-  bodyClassName?: string;
+  bodyClassName?: string; // ✅ match your project
+  action?: React.ReactNode;
 };
 
 export default function Panel({
@@ -11,21 +11,25 @@ export default function Panel({
   children,
   className = "",
   bodyClassName = "",
+  action,
 }: PanelProps) {
   return (
-    <div
-      className={`flex flex-col rounded-3xl border border-slate-800/80 bg-slate-950/45 backdrop-blur-xl shadow-[0_12px_32px_rgba(0,0,0,0.30)] ${className}`}
+    <section
+      className={`overflow-hidden rounded-2xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(2,6,23,0.92),rgba(2,6,23,0.72))] shadow-[0_10px_30px_rgba(0,0,0,0.25)] ${className}`}
     >
-      <div className="flex items-center justify-between border-b border-slate-800/80 px-5 py-4 shrink-0">
-        <h2 className="text-sm font-semibold tracking-wide text-slate-100 md:text-base">
+      {/* HEADER */}
+      <div className="flex items-center justify-between border-b border-slate-800/80 px-5 py-4">
+        <h2 className="text-[11px] font-medium uppercase tracking-[0.22em] text-slate-300">
           {title}
         </h2>
-        <div className="h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.7)]" />
+
+        {action && <div>{action}</div>}
       </div>
 
-      <div className={`min-h-0 flex-1 px-4 pb-4 pt-2 ${bodyClassName}`}>
+      {/* BODY */}
+      <div className={`p-5 ${bodyClassName}`}>
         {children}
       </div>
-    </div>
+    </section>
   );
 }

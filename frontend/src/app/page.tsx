@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 
 import Topbar from "@/components/dashboard/Topbar";
 import SearchFilters from "@/components/dashboard/SearchFilters";
@@ -90,27 +91,23 @@ export default function DashboardPage() {
         region === "All Regions"
           ? true
           : region === "Asia"
-          ? ["India", "Singapore"].includes(alert.country)
-          : region === "Europe"
-          ? ["Netherlands"].includes(alert.country)
-          : region === "North America"
-          ? ["USA"].includes(alert.country)
-          : region === "South America"
-          ? ["Brazil"].includes(alert.country)
-          : true;
+            ? ["India", "Singapore"].includes(alert.country)
+            : region === "Europe"
+              ? ["Netherlands"].includes(alert.country)
+              : region === "North America"
+                ? ["USA"].includes(alert.country)
+                : region === "South America"
+                  ? ["Brazil"].includes(alert.country)
+                  : true;
 
       const matchesBusinessUnit =
         businessUnit === "All Units"
           ? true
-          : businessUnit === "Global Ops"
-          ? true
           : businessUnit === "Logistics"
-          ? alert.category === "logistics" || alert.category === "port"
-          : businessUnit === "Risk"
-          ? alert.category === "supplier" ||
-            alert.category === "geo" ||
-            alert.category === "climate"
-          : true;
+            ? alert.category === "logistics" || alert.category === "port"
+            : businessUnit === "Risk"
+              ? ["supplier", "geo", "climate"].includes(alert.category)
+              : true;
 
       const matchesScope =
         scope === "Global"
@@ -121,10 +118,10 @@ export default function DashboardPage() {
         status === "All"
           ? true
           : status === "Alerts"
-          ? alert.status === "active"
-          : status === "Acknowledged"
-          ? alert.status === "acknowledged"
-          : alert.status === "resolved";
+            ? alert.status === "active"
+            : status === "Acknowledged"
+              ? alert.status === "acknowledged"
+              : alert.status === "resolved";
 
       return (
         matchesSearch &&
@@ -165,9 +162,11 @@ export default function DashboardPage() {
     return buildDashboardKpis(alertData);
   }, [alertData]);
 
+  const isRailOpen = !!selectedAlert;
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-slate-800/80">
+      <div className="relative z-50 shrink-0 border-b border-slate-800/80">
         <Topbar
           scope={scope}
           onScopeChange={setScope}
@@ -180,26 +179,67 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
-        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="space-y-6">
-            <SearchFilters
-              search={searchInput}
-              onSearchChange={setSearchInput}
-              region={region}
-              onRegionChange={setRegion}
-              businessUnit={businessUnit}
-              onBusinessUnitChange={setBusinessUnit}
-              riskLevel={riskLevel}
-              onRiskLevelChange={setRiskLevel}
-            />
+      <div className="relative z-0 min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
+        <section className="space-y-6">
+          <SearchFilters
+            search={searchInput}
+            onSearchChange={setSearchInput}
+            region={region}
+            onRegionChange={setRegion}
+            businessUnit={businessUnit}
+            onBusinessUnitChange={setBusinessUnit}
+            riskLevel={riskLevel}
+            onRiskLevelChange={setRiskLevel}
+          />
 
-            <KpiGrid kpis={derivedKpis} />
+          <KpiGrid kpis={derivedKpis} />
 
+          <div className="hidden items-start gap-6 xl:flex">
+            <motion.div
+              layout
+              transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+              className="min-w-0 flex-1"
+            >
+              <MainMapSection
+                alerts={visibleAlerts}
+                selectedAlert={selectedAlert}
+                onSelectAlert={(alert) => setSelectedAlertId(alert?.id ?? null)}
+                activeLayer={activeLayer}
+                onLayerChange={setActiveLayer}
+                activeLevel={activeLevel}
+                onLevelChange={setActiveLevel}
+                onAcknowledge={(id) => updateAlertStatus(id, "acknowledged")}
+                onResolve={(id) => updateAlertStatus(id, "resolved")}
+              />
+            </motion.div>
+
+            <AnimatePresence initial={false} mode="popLayout">
+              {isRailOpen && (
+                <motion.div
+                  key="right-rail"
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 340, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+                  className="shrink-0 overflow-hidden"
+                >
+                  <div className="w-[340px]">
+                    <RightRail
+                      selectedAlert={selectedAlert}
+                      isOpen={isRailOpen}
+                      onClose={() => setSelectedAlertId(null)}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="xl:hidden">
             <MainMapSection
               alerts={visibleAlerts}
               selectedAlert={selectedAlert}
-              onSelectAlert={(alert) => setSelectedAlertId(alert.id)}
+              onSelectAlert={(alert) => setSelectedAlertId(alert?.id ?? null)}
               activeLayer={activeLayer}
               onLayerChange={setActiveLayer}
               activeLevel={activeLevel}
@@ -207,13 +247,11 @@ export default function DashboardPage() {
               onAcknowledge={(id) => updateAlertStatus(id, "acknowledged")}
               onResolve={(id) => updateAlertStatus(id, "resolved")}
             />
+          </div>
 
-            <MidCardsSection />
-            <BottomSection selectedAlertId={selectedAlertId} />
-          </section>
-
-          <RightRail selectedAlert={selectedAlert} />
-        </div>
+          <MidCardsSection />
+          <BottomSection selectedAlertId={selectedAlertId} />
+        </section>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import Panel from "./Panel";
@@ -24,7 +24,7 @@ type LevelFilter = "all" | "stable" | "warning" | "critical";
 type MainMapSectionProps = {
   alerts: AlertItem[];
   selectedAlert: AlertItem | null;
-  onSelectAlert: (alert: AlertItem) => void;
+  onSelectAlert: (alert: AlertItem | null) => void;
   activeLayer: LayerFilter;
   onLayerChange: (layer: LayerFilter) => void;
   activeLevel: LevelFilter;
@@ -44,6 +44,15 @@ function MainMapSection({
   onAcknowledge,
   onResolve,
 }: MainMapSectionProps) {
+  const orderedAlerts = useMemo(() => {
+    if (!selectedAlert) return alerts;
+
+    const selected = alerts.find((a) => a.id === selectedAlert.id);
+    if (!selected) return alerts;
+
+    return [selected, ...alerts.filter((a) => a.id !== selected.id)];
+  }, [alerts, selectedAlert]);
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
       <Panel title="Global Disruption Risk Map" className="xl:col-span-8">
@@ -122,13 +131,19 @@ function MainMapSection({
         <Panel title="Live Alerts Feed">
           <div className="custom-scrollbar h-55 space-y-3 overflow-y-auto pr-1">
             <AnimatePresence mode="popLayout">
-              {alerts.map((alert) => (
+              {orderedAlerts.map((alert) => (
                 <motion.div
                   key={alert.id}
                   layout
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, x: 24, scale: 0.96, height: 0, marginBottom: 0 }}
+                  exit={{
+                    opacity: 0,
+                    x: 24,
+                    scale: 0.96,
+                    height: 0,
+                    marginBottom: 0,
+                  }}
                   transition={{ duration: 0.22, ease: "easeOut" }}
                 >
                   <AlertRow

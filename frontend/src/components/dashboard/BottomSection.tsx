@@ -84,7 +84,7 @@ export default function BottomSection({
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
       <Panel
         title="Mitigation Scenario Comparison"
-        className="xl:col-span-7 h-180"
+        className="xl:col-span-7 h-170"
         bodyClassName="h-[calc(100%-65px)]"
       >
         <MitigationScenarioComparison recommendation={selectedRecommendation} />
@@ -92,8 +92,8 @@ export default function BottomSection({
 
       <Panel
         title="AI Mitigation & Recommendation Engine"
-        className="xl:col-span-5 h-180"
-        bodyClassName="h-[calc(100%-65px)] overflow-y-auto pr-2 custom-scrollbar"
+        className="xl:col-span-5 h-170"
+        bodyClassName="h-[calc(100%-65px)] overflow-y-auto custom-scrollbar"
       >
         <AIMitigationEngine
           recommendations={filteredRecommendations}
