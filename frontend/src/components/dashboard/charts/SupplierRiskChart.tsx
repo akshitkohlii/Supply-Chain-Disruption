@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useMemo, useState } from "react";
@@ -11,30 +10,37 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-import { supplierRiskData } from "@/lib/dashboard-data";
+import type { ApiSupplierExposureItem } from "@/lib/api";
 import ChartTooltip from "./ChartTooltip";
 
 type SortMode = "risk" | "dependency" | "combined";
 
-const RISK_COLOR = "#e11d48";
+type SupplierRiskChartProps = {
+  data: ApiSupplierExposureItem[];
+  isLoading?: boolean;
+};
+
+const RISK_COLOR = "#f43f5e";
 const DEPENDENCY_COLOR = "#f59e0b";
 
+const CARD_HEIGHT = 320;
+const HEADER_HEIGHT = 30;
+const FOOTER_HEIGHT = 42;
 const VISIBLE_ROWS = 6;
 const ROW_HEIGHT = 34;
-const BAR_SIZE = 10;
-const BAR_GAP = 2;
-const BAR_CATEGORY_GAP = 12;
-const VIEWPORT_HEIGHT = VISIBLE_ROWS * ROW_HEIGHT + 24;
+
+const CHART_LEFT = 56;
+const CHART_RIGHT = 18;
 
 function getDisplayData(
-  data: typeof supplierRiskData,
+  data: ApiSupplierExposureItem[],
   sortMode: SortMode,
   showAll: boolean
 ) {
   const sorted = [...data].sort((a, b) => {
-    if (sortMode === "risk") return b.risk - a.risk;
-    if (sortMode === "dependency") return b.dependency - a.dependency;
-    return b.risk + b.dependency - (a.risk + a.dependency);
+    if (sortMode === "risk") return b.risk_score - a.risk_score;
+    if (sortMode === "dependency") return b.dependency_score - a.dependency_score;
+    return b.combined_score - a.combined_score;
   });
 
   return showAll ? sorted : sorted.slice(0, VISIBLE_ROWS);
@@ -53,10 +59,10 @@ function ToggleButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-[11px] transition ${
+      className={`rounded-xl border px-3 py-2 text-[11px] transition ${
         active
           ? "border-indigo-400/30 bg-indigo-500/10 text-indigo-200"
-          : "border-slate-700/80 bg-slate-950/70 text-slate-300 hover:border-slate-600 hover:text-white"
+          : "border-slate-700/80 bg-slate-950/60 text-slate-300 hover:border-slate-600 hover:text-white"
       }`}
     >
       {children}
@@ -64,68 +70,103 @@ function ToggleButton({
   );
 }
 
-function FooterLegend() {
-  return (
-    <div className="flex items-center gap-5 text-[11px] text-slate-400">
-      <div className="flex items-center gap-2">
-        <span
-          className="h-2.5 w-2.5 rounded-full"
-          style={{ backgroundColor: RISK_COLOR }}
-        />
-        <span>Risk Score</span>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <span
-          className="h-2.5 w-2.5 rounded-full"
-          style={{ backgroundColor: DEPENDENCY_COLOR }}
-        />
-        <span>Dependency</span>
-      </div>
-    </div>
-  );
-}
-
-function FooterAxis() {
+function FixedBottomAxis() {
   const ticks = [0, 25, 50, 75, 100];
 
   return (
-    <div className="pl-14.5 pr-3">
-      <div className="relative h-6">
-        <div className="absolute left-0 right-0 top-2 border-t border-slate-800/70" />
+    <div
+      className="relative mt-2"
+      style={{
+        marginLeft: CHART_LEFT,
+        marginRight: CHART_RIGHT,
+      }}
+    >
+      <div className="flex justify-between text-[11px] text-slate-500 px-[2px] opacity-80">
         {ticks.map((tick) => (
-          <div
-            key={tick}
-            className="absolute top-0 -translate-x-1/2 text-[11px] text-slate-500"
-            style={{ left: `${tick}%` }}
-          >
-            <div className="mx-auto mb-1 h-2 w-px bg-slate-700/80" />
-            <span>{tick}</span>
-          </div>
+          <span key={tick}>{tick}</span>
         ))}
       </div>
     </div>
   );
 }
 
-export default function SupplierRiskChart() {
+function Footer({ showingCount }: { showingCount: number }) {
+  return (
+    <div className="flex items-center justify-between gap-4 pt-3 text-[11px] text-slate-400">
+      <div className="flex items-center gap-5">
+        <div className="flex items-center gap-2">
+          <span
+            className="h-3 w-3 rounded-full"
+            style={{ backgroundColor: RISK_COLOR }}
+          />
+          <span>Risk Score</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span
+            className="h-3 w-3 rounded-full"
+            style={{ backgroundColor: DEPENDENCY_COLOR }}
+          />
+          <span>Dependency</span>
+        </div>
+      </div>
+
+      <div className="ml-auto whitespace-nowrap text-right text-slate-500">
+        Showing top{" "}
+        <span className="font-medium text-slate-300">{showingCount}</span>{" "}
+        suppliers
+      </div>
+    </div>
+  );
+}
+
+export default function SupplierRiskChart({
+  data,
+  isLoading = false,
+}: SupplierRiskChartProps) {
   const [sortMode, setSortMode] = useState<SortMode>("risk");
   const [showAll, setShowAll] = useState(false);
 
   const chartData = useMemo(() => {
-    return getDisplayData(supplierRiskData, sortMode, showAll);
-  }, [sortMode, showAll]);
+    return getDisplayData(data, sortMode, showAll).map((item) => ({
+      supplier: item.supplier_name.replace("Supplier ", "S-"),
+      risk: Number(item.risk_score.toFixed(1)),
+      dependency: Number(item.dependency_score.toFixed(1)),
+    }));
+  }, [data, sortMode, showAll]);
 
-  const fullChartHeight = chartData.length * ROW_HEIGHT + 22;
+  const showingCount = showAll ? data.length : Math.min(VISIBLE_ROWS, data.length);
+  const visiblePlotHeight = VISIBLE_ROWS * ROW_HEIGHT;
+  const fullPlotHeight = chartData.length * ROW_HEIGHT + 8;
 
-  const seriesColors = {
-    "Risk Score": RISK_COLOR,
-    Dependency: DEPENDENCY_COLOR,
-  };
+  if (isLoading) {
+    return (
+      <div
+        className="flex items-center justify-center text-sm text-slate-400"
+        style={{ height: CARD_HEIGHT }}
+      >
+        Loading supplier exposure...
+      </div>
+    );
+  }
+
+  if (!data.length) {
+    return (
+      <div
+        className="flex items-center justify-center text-sm text-slate-400"
+        style={{ height: CARD_HEIGHT }}
+      >
+        No supplier exposure data
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+    <div className="flex flex-col" style={{ height: CARD_HEIGHT }}>
+      <div
+        className="mb-5 flex shrink-0 flex-wrap items-center justify-between gap-2 -mt-2"
+        style={{ minHeight: HEADER_HEIGHT }}
+      >
         <div className="flex flex-wrap gap-2">
           <ToggleButton
             active={sortMode === "risk"}
@@ -149,41 +190,39 @@ export default function SupplierRiskChart() {
           </ToggleButton>
         </div>
 
-        {supplierRiskData.length > VISIBLE_ROWS && (
+        {data.length > VISIBLE_ROWS && (
           <button
             type="button"
             onClick={() => setShowAll((prev) => !prev)}
-            className="rounded-lg border border-slate-700/80 bg-slate-950/70 px-3 py-1.5 text-[11px] text-slate-300 transition hover:border-slate-600 hover:text-white"
+            className="rounded-xl border border-slate-700/80 bg-slate-950/60 px-3 py-2 text-[11px] text-slate-300 transition hover:border-slate-600 hover:text-white"
           >
-            {showAll
-              ? `Show Top ${VISIBLE_ROWS}`
-              : `Show All (${supplierRiskData.length})`}
+            {showAll ? `Show Top ${VISIBLE_ROWS}` : `Show All (${data.length})`}
           </button>
         )}
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 shrink-0">
         <div
-          className="custom-scrollbar overflow-y-scroll pr-1"
+          className="custom-scrollbar overflow-y-auto pr-1"
           style={{
-            height: VIEWPORT_HEIGHT,
+            height: visiblePlotHeight,
             scrollbarGutter: "stable",
           }}
         >
           <ResponsiveContainer
             width="100%"
-            height={showAll ? fullChartHeight : VIEWPORT_HEIGHT}
+            height={showAll ? fullPlotHeight : visiblePlotHeight}
           >
             <BarChart
               data={chartData}
               layout="vertical"
-              barSize={BAR_SIZE}
-              barGap={BAR_GAP}
-              barCategoryGap={BAR_CATEGORY_GAP}
-              margin={{ top: 6, right: 12, bottom: 16, left: 6 }}
+              barSize={12}
+              barGap={6}
+              barCategoryGap={12}
+              margin={{ top: 0, right: CHART_RIGHT, bottom: 0, left: 6 }}
             >
               <CartesianGrid
-                stroke="rgba(71,85,105,0.18)"
+                stroke="rgba(71,85,105,0.14)"
                 vertical
                 horizontal={false}
               />
@@ -193,21 +232,15 @@ export default function SupplierRiskChart() {
               <YAxis
                 type="category"
                 dataKey="supplier"
-                width={52}
+                width={CHART_LEFT}
                 tick={{ fill: "#cbd5e1", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
               />
 
               <Tooltip
-                content={
-                  <ChartTooltip
-                    labelPrefix="Supplier"
-                    seriesColors={seriesColors}
-                  />
-                }
-                cursor={{ fill: "rgba(148,163,184,0.06)" }}
-                offset={12}
+                content={<ChartTooltip labelPrefix="Supplier" />}
+                cursor={{ fill: "rgba(148,163,184,0.04)" }}
               />
 
               <Bar
@@ -215,8 +248,6 @@ export default function SupplierRiskChart() {
                 name="Risk Score"
                 fill={RISK_COLOR}
                 radius={[0, 999, 999, 0]}
-                isAnimationActive
-                animationDuration={350}
               />
 
               <Bar
@@ -224,26 +255,21 @@ export default function SupplierRiskChart() {
                 name="Dependency"
                 fill={DEPENDENCY_COLOR}
                 radius={[0, 999, 999, 0]}
-                isAnimationActive
-                animationDuration={350}
               />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      <div className="mt-3 shrink-0 pt-3">
-        <FooterAxis />
+      <div className="mt-3 shrink-0">
+        <FixedBottomAxis />
+      </div>
 
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <FooterLegend />
-
-          <div className="text-[11px] text-slate-500">
-            {showAll
-              ? `Showing all ${supplierRiskData.length} suppliers`
-              : `Showing top ${VISIBLE_ROWS} of ${supplierRiskData.length} suppliers`}
-          </div>
-        </div>
+      <div
+        className="shrink-0"
+        style={{ minHeight: FOOTER_HEIGHT}}
+      >
+        <Footer showingCount={showingCount} />
       </div>
     </div>
   );

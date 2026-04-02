@@ -1,7 +1,7 @@
 "use client";
 
 import KpiCard from "./KpiCard";
-import type { KpiItem } from "@/lib/dashboard-data";
+import type { KpiItem } from "@/lib/mappers";
 
 type KpiGridProps = {
   kpis: KpiItem[];

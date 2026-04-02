@@ -6,6 +6,7 @@ from app.api.v1.alerts import router as alerts_router
 from app.api.v1.map import router as map_router
 from app.api.v1.logistics import router as logistics_router
 from app.api.v1.analytics import router as analytics_router
+from app.api.v1.mitigation import router as mitigation_router
 
 api_router = APIRouter()
 
@@ -16,3 +17,4 @@ api_router.include_router(alerts_router, prefix="/alerts", tags=["alerts"])
 api_router.include_router(map_router, prefix="/map", tags=["map"])
 api_router.include_router(logistics_router, prefix="/logistics", tags=["logistics"])
 api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
+api_router.include_router(mitigation_router, prefix="/mitigation", tags=["mitigation"])

@@ -25,6 +25,14 @@ async def generate_alerts():
         inventory_level = float(item.get("inventory_level", 0) or 0)
         safety_stock_level = float(item.get("safety_stock_level", 0) or 0)
 
+        inventory_pressure = 1 if inventory_level < safety_stock_level else 0
+        risk_score = (
+            (delay_hours * 0.4) + 
+            (weather_risk * 25) + 
+            (port_congestion * 25) + 
+            (inventory_pressure * 15)
+        )
+
         level = classify_alert_level(
             delay_hours=delay_hours,
             weather_risk=weather_risk,
@@ -32,9 +40,6 @@ async def generate_alerts():
             inventory_level=inventory_level,
             safety_stock_level=safety_stock_level,
         )
-
-        if level == "stable":
-            continue
 
         category = classify_alert_category(
             delay_hours=delay_hours,
@@ -52,6 +57,7 @@ async def generate_alerts():
 
         alert_docs.append({
             "alert_id": alert_id,
+            "risk_score": risk_score,
             "title": build_alert_title(category, supplier_name, destination_port),
             "summary": build_alert_summary(
                 category,

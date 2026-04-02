@@ -8,7 +8,7 @@ import AlertRow from "./ui/AlertRow";
 import MiniStat from "./ui/MiniStat";
 import WorldRiskMap from "./WorldriskMap";
 
-import type { AlertItem } from "@/lib/dashboard-data";
+import type { AlertItem } from "@/lib/mappers";
 import { emergingSignals } from "@/lib/dashboard-data";
 
 type LayerFilter =
@@ -22,7 +22,8 @@ type LayerFilter =
 type LevelFilter = "all" | "stable" | "warning" | "critical";
 
 type MainMapSectionProps = {
-  alerts: AlertItem[];
+  mapAlerts: AlertItem[];
+  feedAlerts: AlertItem[];
   selectedAlert: AlertItem | null;
   onSelectAlert: (alert: AlertItem | null) => void;
   activeLayer: LayerFilter;
@@ -34,7 +35,8 @@ type MainMapSectionProps = {
 };
 
 function MainMapSection({
-  alerts,
+  mapAlerts = [],
+  feedAlerts = [],
   selectedAlert,
   onSelectAlert,
   activeLayer,
@@ -45,13 +47,13 @@ function MainMapSection({
   onResolve,
 }: MainMapSectionProps) {
   const orderedAlerts = useMemo(() => {
-    if (!selectedAlert) return alerts;
+    if (!selectedAlert) return feedAlerts;
 
-    const selected = alerts.find((a) => a.id === selectedAlert.id);
-    if (!selected) return alerts;
+    const selected = feedAlerts.find((a) => a.id === selectedAlert.id);
+    if (!selected) return feedAlerts;
 
-    return [selected, ...alerts.filter((a) => a.id !== selected.id)];
-  }, [alerts, selectedAlert]);
+    return [selected, ...feedAlerts.filter((a) => a.id !== selected.id)];
+  }, [feedAlerts, selectedAlert]);
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -92,7 +94,7 @@ function MainMapSection({
 
           <div className="relative z-0 min-h-0 flex-1 overflow-hidden rounded-2xl">
             <WorldRiskMap
-              alerts={alerts}
+              alerts={mapAlerts}
               selectedAlertId={selectedAlert?.id ?? null}
               onSelectAlert={onSelectAlert}
             />
@@ -128,7 +130,14 @@ function MainMapSection({
       </Panel>
 
       <div className="space-y-4 xl:col-span-4">
-        <Panel title="Live Alerts Feed">
+        <Panel 
+          title="Live Alerts Feed"
+          action={
+            <div className="flex h-5 items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2 text-[10px] font-medium text-cyan-300">
+              {orderedAlerts.length} Alerts
+            </div>
+          }
+        >
           <div className="custom-scrollbar h-55 space-y-3 overflow-y-auto pr-1">
             <AnimatePresence mode="popLayout">
               {orderedAlerts.map((alert) => (

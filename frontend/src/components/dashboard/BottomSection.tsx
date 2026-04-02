@@ -1,136 +1,173 @@
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Panel from "./Panel";
 import AIMitigationEngine from "./AIMitigationEngine";
 import MitigationScenarioComparison from "./MitigationScenarioComparison";
-import {
-  mitigationRecommendations,
-  type MitigationRecommendation,
-} from "@/lib/dashboard-data";
+import Panel from "./Panel";
+import { getMitigationPlan, type ApiMitigationPlan } from "@/lib/api";
+
+type Scenario = {
+  id: string;
+  label: string;
+  riskScore: number;
+  delayHours: number;
+  recoveryDays: number;
+  costImpact: number;
+};
+
+type Recommendation = {
+  id: string;
+  alertId: string;
+  title: string;
+  priority: "low" | "medium" | "high";
+  confidence: number;
+  impactReduction: number;
+  reason: string;
+  actions: string[];
+  reroutePlan?: {
+    from: string;
+    to: string;
+    etaSavingsHours: number;
+  };
+  stockPlan?: {
+    supplier: string;
+    skuGroup: string;
+    currentDaysCover: number;
+    recommendedDaysCover: number;
+    increasePercent: number;
+  };
+  scenarios: Scenario[];
+};
 
 type BottomSectionProps = {
   selectedAlertId: string | null;
 };
 
+function mapMitigationPlanToUi(plan: ApiMitigationPlan): Recommendation {
+  return {
+    id: plan.id,
+    alertId: plan.alert_id,
+    title: plan.title,
+    priority: plan.priority,
+    confidence: plan.confidence,
+    impactReduction: plan.impact_reduction,
+    reason: plan.reason,
+    actions: plan.actions,
+    reroutePlan: plan.reroute_plan
+      ? {
+          from: plan.reroute_plan.from,
+          to: plan.reroute_plan.to,
+          etaSavingsHours: plan.reroute_plan.eta_savings_hours,
+        }
+      : undefined,
+    stockPlan: plan.stock_plan
+      ? {
+          supplier: plan.stock_plan.supplier,
+          skuGroup: plan.stock_plan.sku_group,
+          currentDaysCover: plan.stock_plan.current_days_cover,
+          recommendedDaysCover: plan.stock_plan.recommended_days_cover,
+          increasePercent: plan.stock_plan.increase_percent,
+        }
+      : undefined,
+    scenarios: plan.scenarios.map((scenario) => ({
+      id: scenario.id,
+      label: scenario.label,
+      riskScore: scenario.risk_score,
+      delayHours: scenario.delay_hours,
+      recoveryDays: scenario.recovery_days,
+      costImpact: scenario.cost_impact,
+    })),
+  };
+}
+
 export default function BottomSection({
   selectedAlertId,
 }: BottomSectionProps) {
-  const filteredRecommendations = useMemo(() => {
-    if (!selectedAlertId) return [];
-    return mitigationRecommendations.filter(
-      (item) => item.alertId === selectedAlertId
-    );
-  }, [selectedAlertId]);
-
-  const hasRecommendations = filteredRecommendations.length > 0;
-
-  const [selectedRecommendationId, setSelectedRecommendationId] = useState<string | null>(null);
+  const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (hasRecommendations) {
-      setSelectedRecommendationId(filteredRecommendations[0].id);
-    } else {
-      setSelectedRecommendationId(null);
+    let isCancelled = false;
+
+    async function loadMitigation() {
+      if (!selectedAlertId) {
+        setRecommendation(null);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await getMitigationPlan(selectedAlertId);
+
+        if (!isCancelled) {
+          setRecommendation(mapMitigationPlanToUi(response));
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setRecommendation(null);
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load mitigation plan."
+          );
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
     }
-  }, [filteredRecommendations, hasRecommendations]);
 
-  const selectedRecommendation = useMemo<MitigationRecommendation | null>(() => {
-    if (!hasRecommendations) return null;
+    loadMitigation();
 
-    return (
-      filteredRecommendations.find(
-        (item) => item.id === selectedRecommendationId
-      ) ?? filteredRecommendations[0] ?? null
-    );
-  }, [filteredRecommendations, selectedRecommendationId, hasRecommendations]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedAlertId]);
 
-  if (!selectedAlertId) {
-    return (
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <CollapsedCard
-          title="Mitigation Scenario Comparison"
-          className="xl:col-span-7"
-          message="Select an alert to compare mitigation outcomes."
-        />
-        <CollapsedCard
-          title="AI Mitigation & Recommendation Engine"
-          className="xl:col-span-5"
-          message="Select an alert to view AI recommendations."
-        />
-      </div>
-    );
-  }
+  const scenarioData = useMemo(() => {
+    return recommendation?.scenarios ?? [];
+  }, [recommendation]);
 
-  if (!hasRecommendations) {
-    return (
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <CollapsedCard
-          title="Mitigation Scenario Comparison"
-          className="xl:col-span-7"
-          message="No mitigation scenarios available for the selected alert."
-        />
-        <CollapsedCard
-          title="AI Mitigation & Recommendation Engine"
-          className="xl:col-span-5"
-          message="No AI recommendations available for the selected alert."
-        />
-      </div>
-    );
-  }
+  const panelHeightClass = selectedAlertId ? "h-[720px]" : "";
+  const panelBodyClass = selectedAlertId ? "h-[calc(100%-57px)] min-h-0" : "";
 
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-      <Panel
-        title="Mitigation Scenario Comparison"
-        className="xl:col-span-7 h-170"
-        bodyClassName="h-[calc(100%-65px)]"
-      >
-        <MitigationScenarioComparison recommendation={selectedRecommendation} />
-      </Panel>
-
-      <Panel
-        title="AI Mitigation & Recommendation Engine"
-        className="xl:col-span-5 h-170"
-        bodyClassName="h-[calc(100%-65px)] overflow-y-auto custom-scrollbar"
-      >
-        <AIMitigationEngine
-          recommendations={filteredRecommendations}
-          selectedRecommendationId={selectedRecommendationId}
-          onSimulate={(recommendation) =>
-            setSelectedRecommendationId(recommendation.id)
-          }
-        />
-      </Panel>
-    </div>
-  );
-}
-
-function CollapsedCard({
-  title,
-  message,
-  className = "",
-}: {
-  title: string;
-  message: string;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`rounded-3xl border border-slate-800/80 bg-slate-950/45 backdrop-blur-xl shadow-[0_12px_32px_rgba(0,0,0,0.30)] ${className}`}
-    >
-      <div className="flex items-center justify-between border-b border-slate-800/80 px-5 py-4">
-        <h2 className="text-sm font-semibold tracking-wide text-slate-100 md:text-base">
-          {title}
-        </h2>
-        <div className="h-2 w-2 rounded-full bg-slate-400 shadow-[0_0_8px_rgba(148,163,184,0.2)]" />
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+      <div className="xl:col-span-8 min-h-0">
+        <Panel
+          title="Mitigation Scenario Comparison"
+          className={panelHeightClass}
+          bodyClassName={panelBodyClass}
+        >
+          <MitigationScenarioComparison
+            recommendation={recommendation}
+            scenarios={scenarioData}
+            isLoading={isLoading}
+            error={error}
+            selectedAlertId={selectedAlertId}
+          />
+        </Panel>
       </div>
 
-      <div className="px-4 pb-4 pt-3">
-        <div className="rounded-2xl border border-dashed border-slate-700/80 bg-slate-950/40 p-4 text-sm text-slate-400">
-          {message}
-        </div>
+      <div className="xl:col-span-4 min-h-0">
+        <Panel
+          title="AI Mitigation & Recommendation Engine"
+          className={panelHeightClass}
+          bodyClassName={panelBodyClass}
+        >
+          <AIMitigationEngine
+            recommendation={recommendation}
+            isLoading={isLoading}
+            error={error}
+            selectedAlertId={selectedAlertId}
+          />
+        </Panel>
       </div>
     </div>
   );

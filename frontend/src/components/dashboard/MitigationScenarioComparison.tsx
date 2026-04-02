@@ -1,27 +1,66 @@
-
 "use client";
 
-import type { MitigationRecommendation } from "@/lib/dashboard-data";
 import MitigationRadarChart from "./charts/MitigationRadarChart";
 
+type Scenario = {
+  id: string;
+  label: string;
+  riskScore: number;
+  delayHours: number;
+  recoveryDays: number;
+  costImpact: number;
+};
+
+type Recommendation = {
+  id: string;
+  alertId: string;
+  title: string;
+  priority: "low" | "medium" | "high";
+  confidence: number;
+  impactReduction: number;
+  reason: string;
+  actions: string[];
+  scenarios: Scenario[];
+};
+
 type MitigationScenarioComparisonProps = {
-  recommendation: MitigationRecommendation | null;
+  recommendation: Recommendation | null;
+  scenarios: Scenario[];
+  isLoading?: boolean;
+  error?: string | null;
+  selectedAlertId?: string | null;
 };
 
 export default function MitigationScenarioComparison({
   recommendation,
+  scenarios,
+  isLoading = false,
+  error = null,
+  selectedAlertId,
 }: MitigationScenarioComparisonProps) {
-  if (!recommendation) {
+  if (!selectedAlertId) {
+    return <EmptyState message="Select an alert to compare mitigation scenarios." />;
+  }
+
+  if (isLoading) {
+    return <EmptyState message="Loading mitigation scenarios..." />;
+  }
+
+  if (error) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-700/80 bg-slate-950/40 p-5 text-sm text-slate-400">
-        Select <span className="text-slate-200">Simulate</span> on a recommendation to compare outcomes.
+      <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-300">
+        {error}
       </div>
     );
   }
 
-  const baseline = recommendation.scenarios[0];
+  if (!recommendation || scenarios.length === 0) {
+    return <EmptyState message="No simulation scenarios available for this alert." />;
+  }
 
-  const bestScenario = recommendation.scenarios.reduce((best, current) => {
+  const baseline = scenarios[0];
+
+  const bestScenario = scenarios.reduce((best, current) => {
     const bestScore =
       best.riskScore + best.delayHours + best.recoveryDays * 10 + best.costImpact;
     const currentScore =
@@ -29,10 +68,11 @@ export default function MitigationScenarioComparison({
       current.delayHours +
       current.recoveryDays * 10 +
       current.costImpact;
+
     return currentScore < bestScore ? current : best;
   });
 
-  const radarData = recommendation.scenarios.map((scenario) => ({
+  const radarData = scenarios.map((scenario) => ({
     scenario: scenario.label,
     risk: scenario.riskScore,
     delay: Math.min(100, scenario.delayHours * 4),
@@ -41,51 +81,51 @@ export default function MitigationScenarioComparison({
   }));
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden">
+      <div className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4">
         <MetricCard label="Confidence" value={`${recommendation.confidence}%`} />
         <MetricCard label="Risk Reduction" value={`-${recommendation.impactReduction}%`} />
         <MetricCard label="Baseline Risk" value={`${baseline.riskScore}`} />
         <MetricCard label="Best Option" value={bestScenario.label} compact />
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[1.22fr_0.78fr]">
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-3">
-          <div className="mb-3">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+        <div className="flex min-h-0 flex-col rounded-2xl border border-slate-800/70 bg-slate-950/50 p-4">
+          <div className="shrink-0">
             <h3 className="text-sm font-medium text-white">Outcome Comparison</h3>
             <p className="text-xs text-slate-400">
               Lower values are better across risk, delay, recovery, and cost.
             </p>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-800/70">
-            <div className="grid grid-cols-[1.7fr_0.9fr_0.95fr_1.05fr_0.8fr] gap-x-4 bg-slate-950/70 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-slate-500">
-  <div>Scenario</div>
-  <div>Risk</div>
-  <div>Delay</div>
-  <div>Recovery</div>
-  <div>Cost</div>
-</div>
+          <div className="mt-4 min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-800/70">
+            <div className="grid grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.8fr] gap-x-3 bg-slate-950/70 px-4 py-3 text-[11px] uppercase tracking-[0.16em] text-slate-500">
+              <div>Scenario</div>
+              <div>Risk</div>
+              <div>Delay</div>
+              <div>Recovery</div>
+              <div>Cost</div>
+            </div>
 
-            <div className="divide-y divide-slate-800/70">
-              {recommendation.scenarios.map((scenario) => {
+            <div className="h-full overflow-y-auto divide-y divide-slate-800/70">
+              {scenarios.map((scenario) => {
                 const isBaseline = scenario.id === baseline.id;
                 const isBest = scenario.id === bestScenario.id;
 
                 return (
                   <div
-  key={scenario.id}
-  className={`grid grid-cols-[1.7fr_0.9fr_0.95fr_1.05fr_0.8fr] items-center gap-x-4 px-3 py-3 text-sm ${
-    isBest
-      ? "bg-emerald-500/8"
-      : isBaseline
-      ? "bg-slate-950/60"
-      : "bg-slate-900/40"
-  }`}
->
+                    key={scenario.id}
+                    className={`grid grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.8fr] items-center gap-x-3 px-4 py-4 text-sm ${
+                      isBest
+                        ? "bg-emerald-500/8"
+                        : isBaseline
+                        ? "bg-slate-950/60"
+                        : "bg-slate-900/35"
+                    }`}
+                  >
                     <div className="pr-3">
                       <div className="font-medium text-white">{scenario.label}</div>
-                      <div className="mt-1 flex gap-2">
+                      <div className="mt-2 flex gap-2">
                         {isBaseline && (
                           <span className="rounded-full border border-slate-700/80 bg-slate-950/80 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-400">
                             Baseline
@@ -109,33 +149,44 @@ export default function MitigationScenarioComparison({
             </div>
           </div>
 
-          <div className="mt-3 rounded-xl border border-slate-800/70 bg-slate-950/55 px-3 py-3">
+          <div className="mt-4 shrink-0 rounded-2xl border border-slate-800/70 bg-slate-950/55 px-4 py-4">
             <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
               Decision Insight
             </div>
-            <p className="mt-2 text-sm text-slate-300">
-              <span className="font-medium text-white">{bestScenario.label}</span> offers the strongest
-              trade-off for this recommendation by reducing disruption risk while keeping recovery time controlled.
+            <p className="mt-3 text-sm text-slate-300">
+              <span className="font-medium text-white">{bestScenario.label}</span>{" "}
+              offers the strongest trade-off by reducing disruption risk while keeping
+              recovery time controlled.
             </p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-3">
-          <div className="mb-3">
+        <div className="flex min-h-0 flex-col rounded-2xl border border-slate-800/70 bg-slate-950/50 p-4">
+          <div className="shrink-0">
             <h3 className="text-sm font-medium text-white">Trade-off Radar</h3>
             <p className="text-xs text-slate-400">
               Normalized view of scenario trade-offs.
             </p>
           </div>
 
-          <MitigationRadarChart data={radarData} />
+          <div className="mt-4 flex flex-1 items-center justify-center overflow-hidden">
+            <MitigationRadarChart data={radarData} />
+          </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="mt-4 shrink-0 grid grid-cols-2 gap-3">
             <MiniStat label="Selected Strategy" value={recommendation.title} compact />
-            <MiniStat label="Compared Scenarios" value={`${recommendation.scenarios.length}`} />
+            <MiniStat label="Compared" value={`${scenarios.length}`} />
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-700/80 bg-slate-950/40 p-4 text-sm text-slate-400">
+      {message}
     </div>
   );
 }
@@ -150,9 +201,11 @@ function MetricCard({
   compact?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-slate-800/80 bg-slate-950/55 p-2.5">
-      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</div>
-      <div className={`mt-2 font-semibold text-white ${compact ? "text-sm" : "text-lg"}`}>
+    <div className="rounded-2xl border border-slate-800/70 bg-slate-950/55 p-3">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-3 font-semibold text-white ${compact ? "text-sm" : "text-lg"}`}>
         {value}
       </div>
     </div>
@@ -169,9 +222,11 @@ function MiniStat({
   compact?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-slate-800/80 bg-slate-950/55 p-3">
-      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</div>
-      <div className={`mt-2 font-semibold text-white ${compact ? "text-sm" : "text-base"}`}>
+    <div className="rounded-2xl border border-slate-800/70 bg-slate-950/55 p-3">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-3 font-semibold text-white ${compact ? "text-sm" : "text-base"}`}>
         {value}
       </div>
     </div>

@@ -19,9 +19,10 @@ async def get_dashboard_overview():
     avg_delay = agg_result[0]["avg_delay"] if agg_result else 0
     avg_inventory = agg_result[0]["avg_inventory"] if agg_result else 0
 
-    # High risk logic (mock)
-    high_risk_count = await db.shipments_raw.count_documents({
-        "delay_hours": {"$gt": 20}
+    # High risk
+    high_risk_count = await db.alerts.count_documents({
+        "level": "critical",
+        "status": "active"
     })
 
     # Top region

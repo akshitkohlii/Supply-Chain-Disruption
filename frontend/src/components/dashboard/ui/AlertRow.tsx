@@ -1,7 +1,7 @@
 
 "use client";
 
-import type { AlertItem } from "@/lib/dashboard-data";
+import type { AlertItem } from "@/lib/mappers";
 import { Check, CheckCheck, Clock3 } from "lucide-react";
 
 type AlertRowProps = {

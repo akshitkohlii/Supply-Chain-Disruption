@@ -54,7 +54,10 @@ def build_alert_summary(category: str, delay_hours: float, weather_risk: float, 
 
 
 async def get_all_alerts(limit: int = 50):
-    cursor = db.alerts.find({}).sort("timestamp", -1).limit(limit)
+    cursor = db.alerts.find({}).sort([
+        ("risk_score", -1), 
+        ("timestamp", -1)
+    ]).limit(limit)
     alerts = await cursor.to_list(length=limit)
 
     for alert in alerts:

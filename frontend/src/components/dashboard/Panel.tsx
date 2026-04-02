@@ -2,7 +2,7 @@ type PanelProps = {
   title: string;
   children: React.ReactNode;
   className?: string;
-  bodyClassName?: string; // ✅ match your project
+  bodyClassName?: string;
   action?: React.ReactNode;
 };
 
