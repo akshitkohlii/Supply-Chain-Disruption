@@ -8,8 +8,8 @@ import AlertRow from "./ui/AlertRow";
 import MiniStat from "./ui/MiniStat";
 import WorldRiskMap from "./WorldriskMap";
 
+import type { ApiEmergingSignal } from "@/lib/api";
 import type { AlertItem } from "@/lib/mappers";
-import { emergingSignals } from "@/lib/dashboard-data";
 
 type LayerFilter =
   | "all"
@@ -32,7 +32,34 @@ type MainMapSectionProps = {
   onLevelChange: (level: LevelFilter) => void;
   onAcknowledge: (id: string) => void;
   onResolve: (id: string) => void;
+  emergingSignals: ApiEmergingSignal[];
+  emergingSignalsLoading?: boolean;
+  emergingSignalsError?: string | null;
 };
+
+function getSignalTone(
+  severity: ApiEmergingSignal["severity"]
+): "stable" | "warning" | "critical" {
+  if (severity === "high") return "critical";
+  if (severity === "medium") return "warning";
+  return "stable";
+}
+
+function formatSignalValue(signal: ApiEmergingSignal) {
+  return signal.emerging_score;
+}
+
+function formatSignalLabel(signal: ApiEmergingSignal) {
+  const source =
+    signal.source_type === "weather"
+      ? "Weather"
+      : signal.source_type === "congestion"
+        ? "Congestion"
+        : "News";
+
+  const port = signal.port_name ?? "Unknown Port";
+  return `${source} • ${port}`;
+}
 
 function MainMapSection({
   mapAlerts = [],
@@ -45,6 +72,9 @@ function MainMapSection({
   onLevelChange,
   onAcknowledge,
   onResolve,
+  emergingSignals,
+  emergingSignalsLoading = false,
+  emergingSignalsError = null,
 }: MainMapSectionProps) {
   const orderedAlerts = useMemo(() => {
     if (!selectedAlert) return feedAlerts;
@@ -54,6 +84,8 @@ function MainMapSection({
 
     return [selected, ...feedAlerts.filter((a) => a.id !== selected.id)];
   }, [feedAlerts, selectedAlert]);
+
+  const topEmergingSignals = useMemo(() => emergingSignals.slice(0, 4), [emergingSignals]);
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -131,7 +163,7 @@ function MainMapSection({
       </Panel>
 
       <div className="space-y-4 xl:col-span-4">
-        <Panel 
+        <Panel
           title="Live Alerts Feed"
           action={
             <div className="flex h-5 items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2 text-[10px] font-medium text-cyan-300">
@@ -169,16 +201,45 @@ function MainMapSection({
           </div>
         </Panel>
 
-        <Panel title="Emerging Risk Signals">
-          <div className="grid grid-cols-2 gap-3">
-            {emergingSignals.map((signal) => (
-              <MiniStat
-                key={signal.id}
-                label={signal.label}
-                value={signal.value}
-                trend={signal.trend}
-              />
-            ))}
+        <Panel
+          title="Emerging Risk Signals"
+          className="h-70"
+          bodyClassName="h-full px-3 py-5"
+        >
+          <div className="h-full overflow-hidden">
+            {emergingSignalsLoading ? (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                Loading emerging signals...
+              </div>
+            ) : emergingSignalsError ? (
+              <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-300">
+                {emergingSignalsError}
+              </div>
+            ) : !topEmergingSignals.length ? (
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                No emerging signals available
+              </div>
+            ) : (
+              <div className="custom-scrollbar h-full overflow-y-auto">
+                <div className="grid content-start grid-cols-2 gap-1.5">
+                  {topEmergingSignals.map((signal) => (
+                    <MiniStat
+                      key={signal.signal_id}
+                      label={formatSignalLabel(signal)}
+                      value={formatSignalValue(signal)}
+                      tone={getSignalTone(signal.severity)}
+                      trend={
+                        signal.severity === "high"
+                          ? "up"
+                          : signal.severity === "medium"
+                            ? "stable"
+                            : "down"
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </Panel>
       </div>

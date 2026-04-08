@@ -175,7 +175,6 @@ body {
   opacity: 0.9;
 }
 
-/* Small hover labels */
 .maplibregl-ctrl-zoom-in::after,
 .maplibregl-ctrl-zoom-out::after {
   position: absolute;

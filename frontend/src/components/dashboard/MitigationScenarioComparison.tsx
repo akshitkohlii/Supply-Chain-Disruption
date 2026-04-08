@@ -80,18 +80,23 @@ export default function MitigationScenarioComparison({
     return rankScenario(current) < rankScenario(best) ? current : best;
   });
 
+  const maxRisk = Math.max(...scenarios.map((s) => s.riskScore), 1);
+  const maxDelay = Math.max(...scenarios.map((s) => s.delayHours), 1);
+  const maxRecovery = Math.max(...scenarios.map((s) => s.recoveryDays), 1);
+  const maxCost = Math.max(...scenarios.map((s) => s.costImpact), 1);
+
   const radarData = scenarios.map((scenario) => ({
     scenario: scenario.label,
-    risk: Math.min(100, scenario.riskScore),
-    delay: Math.min(100, scenario.delayHours * 4),
-    recovery: Math.min(100, scenario.recoveryDays * 20),
-    cost: Math.min(100, scenario.costImpact / 250),
+    risk: Math.round((scenario.riskScore / maxRisk) * 100),
+    delay: Math.round((scenario.delayHours / maxDelay) * 100),
+    recovery: Math.round((scenario.recoveryDays / maxRecovery) * 100),
+    cost: Math.round((scenario.costImpact / maxCost) * 100),
   }));
 
   return (
     <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden">
       <div className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4">
-        <MetricCard label="Confidence" value={`${(recommendation.confidence)*100}%`} />
+        <MetricCard label="Confidence" value={`${recommendation.confidence}%`} />
         <MetricCard label="Risk Reduction" value={`-${recommendation.impactReduction}%`} />
         <MetricCard label="Baseline Risk" value={`${baseline.riskScore}`} />
         <MetricCard label="Best Option" value={bestScenario.label} compact />
@@ -123,13 +128,12 @@ export default function MitigationScenarioComparison({
                 return (
                   <div
                     key={scenario.id}
-                    className={`grid grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.9fr] items-center gap-x-3 px-4 py-4 text-sm ${
-                      isBest
+                    className={`grid grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.9fr] items-center gap-x-3 px-4 py-4 text-sm ${isBest
                         ? "bg-emerald-500/8"
                         : isBaseline
                           ? "bg-slate-950/60"
                           : "bg-slate-900/35"
-                    }`}
+                      }`}
                   >
                     <div className="pr-3">
                       <div className="font-medium text-white">{scenario.label}</div>

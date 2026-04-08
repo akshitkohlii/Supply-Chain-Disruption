@@ -8,64 +8,15 @@ from app.core.database import get_database
 
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
-# Manual exact coordinates for known ports in your dataset
 PORT_COORDINATE_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "Shanghai Port": {
-        "country": "China",
-        "lat": 31.2304,
-        "lng": 121.4737,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
-    "Mumbai Port": {
-        "country": "India",
-        "lat": 18.9497,
-        "lng": 72.8406,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
-    "Hamburg Port": {
-        "country": "Germany",
-        "lat": 53.5461,
-        "lng": 9.9661,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
-    "Rotterdam Port": {
-        "country": "Netherlands",
-        "lat": 51.9244,
-        "lng": 4.4777,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
-    "Singapore Port": {
-        "country": "Singapore",
-        "lat": 1.2644,
-        "lng": 103.8405,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
-    "Busan Port": {
-        "country": "South Korea",
-        "lat": 35.1028,
-        "lng": 129.0403,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
-    "Los Angeles Port": {
-        "country": "United States",
-        "lat": 33.7361,
-        "lng": -118.2631,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
-    "Dubai Port": {
-        "country": "United Arab Emirates",
-        "lat": 25.0657,
-        "lng": 55.1713,
-        "coordinate_source": "manual_override",
-        "coordinate_confidence": "exact",
-    },
+    "Shanghai Port": {"country": "China", "lat": 31.2304, "lng": 121.4737},
+    "Mumbai Port": {"country": "India", "lat": 18.9497, "lng": 72.8406},
+    "Hamburg Port": {"country": "Germany", "lat": 53.5461, "lng": 9.9661},
+    "Busan Port": {"country": "South Korea", "lat": 35.1028, "lng": 129.0403},
+    "Los Angeles Port": {"country": "United States", "lat": 33.7361, "lng": -118.2631},
+    "Singapore Port": {"country": "Singapore", "lat": 1.2644, "lng": 103.8405},
+    "Rotterdam Port": {"country": "Netherlands", "lat": 51.9244, "lng": 4.4777},
+    "Dubai Port": {"country": "United Arab Emirates", "lat": 25.0657, "lng": 55.1713},
 }
 
 COUNTRY_CODE_MAP = {
@@ -114,11 +65,7 @@ def country_code_for(country: Optional[str]) -> Optional[str]:
 
 
 def normalize_port_query(port_name: str) -> str:
-    return (
-        port_name.replace(" Port", "")
-        .replace(" port", "")
-        .strip()
-    )
+    return port_name.replace(" Port", "").replace(" port", "").strip()
 
 
 async def geocode_port(
@@ -162,9 +109,9 @@ async def collect_ports_from_shipments() -> Dict[str, Dict[str, Any]]:
     docs = await db.shipments_raw.find(
         {},
         {
-            "tier1_origin_port": 1,
-            "tier2_transit_port": 1,
-            "tier3_destination_port": 1,
+            "origin_port": 1,
+            "destination_port": 1,
+            "supplier_country": 1,
         },
     ).to_list(length=100000)
 
@@ -172,9 +119,8 @@ async def collect_ports_from_shipments() -> Dict[str, Dict[str, Any]]:
 
     for doc in docs:
         entries = [
-            ("origin", normalize_str(doc.get("tier1_origin_port"))),
-            ("transit", normalize_str(doc.get("tier2_transit_port"))),
-            ("destination", normalize_str(doc.get("tier3_destination_port"))),
+            ("origin", normalize_str(doc.get("origin_port"))),
+            ("destination", normalize_str(doc.get("destination_port"))),
         ]
 
         for role, port_name in entries:
@@ -187,13 +133,13 @@ async def collect_ports_from_shipments() -> Dict[str, Dict[str, Any]]:
                 ports[key] = {
                     "_id": port_name,
                     "port_name": port_name,
-                    "country": override.get("country"),
+                    "country": override.get("country") or doc.get("supplier_country"),
                     "roles": {role},
                     "shipment_count": 1,
                     "lat": override.get("lat"),
                     "lng": override.get("lng"),
-                    "coordinate_source": override.get("coordinate_source"),
-                    "coordinate_confidence": override.get("coordinate_confidence"),
+                    "coordinate_source": "manual_override" if override else None,
+                    "coordinate_confidence": "exact" if override else None,
                 }
             else:
                 ports[key]["roles"].add(role)

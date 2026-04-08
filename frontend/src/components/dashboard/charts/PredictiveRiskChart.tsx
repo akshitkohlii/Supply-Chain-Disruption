@@ -11,6 +11,10 @@ import {
   CartesianGrid,
   ReferenceLine,
 } from "recharts";
+import type {
+  NameType,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
 import type { ApiAnalyticsOverview, ApiForecastPoint } from "@/lib/api";
 import ChartTooltip from "./ChartTooltip";
 
@@ -47,6 +51,13 @@ function getDomain(values: number[]) {
   return [lower, upper];
 }
 
+function getNumericTooltipValue(value: ValueType | undefined) {
+  if (Array.isArray(value)) {
+    return Number(value[0] ?? 0);
+  }
+  return Number(value ?? 0);
+}
+
 function FooterLegend() {
   return (
     <div className="flex items-center justify-between gap-4 text-[11px] text-slate-400">
@@ -62,9 +73,7 @@ function FooterLegend() {
         </div>
       </div>
 
-      <div className="whitespace-nowrap text-right text-slate-500">
-        7-day trend
-      </div>
+      <div className="whitespace-nowrap text-right text-slate-500">7-day trend</div>
     </div>
   );
 }
@@ -92,9 +101,7 @@ export default function PredictiveRiskChart({
 
   const avgCurrent = useMemo(() => {
     if (!chartData.length) return 0;
-    return (
-      chartData.reduce((sum, item) => sum + item.current, 0) / chartData.length
-    );
+    return chartData.reduce((sum, item) => sum + item.current, 0) / chartData.length;
   }, [chartData]);
 
   if (isLoading) {
@@ -157,86 +164,96 @@ export default function PredictiveRiskChart({
             <defs>
               <linearGradient id="predictiveCurrentFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.22} />
-                <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.015} />
+                <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.02} />
               </linearGradient>
               <linearGradient id="predictiveForecastFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.16} />
-                <stop offset="95%" stopColor="#a78bfa" stopOpacity={0.01} />
+                <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#a78bfa" stopOpacity={0.02} />
               </linearGradient>
             </defs>
 
             <CartesianGrid
-              stroke="rgba(71,85,105,0.14)"
               vertical={false}
+              stroke="rgba(71,85,105,0.14)"
               strokeDasharray="3 6"
             />
 
             <XAxis
               dataKey="day"
               tick={{ fill: "#94a3b8", fontSize: 11 }}
-              axisLine={false}
               tickLine={false}
-              height={30}
-              dy={6}
+              axisLine={false}
+              dy={8}
             />
 
             <YAxis
               domain={yDomain}
-              width={34}
               tick={{ fill: "#94a3b8", fontSize: 11 }}
-              axisLine={false}
               tickLine={false}
-              tickCount={5}
+              axisLine={false}
+              width={34}
             />
 
-            <Tooltip
-              content={<ChartTooltip />}
-              cursor={{
-                stroke: "rgba(148,163,184,0.24)",
-                strokeWidth: 1,
-                strokeDasharray: "4 4",
-              }}
-            />
+            <Tooltip content={<ChartTooltip />} cursor={false} />
 
             <ReferenceLine
               y={Number(avgCurrent.toFixed(1))}
               stroke="rgba(148,163,184,0.22)"
-              strokeDasharray="4 4"
+              strokeDasharray="6 6"
             />
 
             <Area
               type="monotone"
               dataKey="current"
-              name="Current Risk"
               stroke="#38bdf8"
+              strokeWidth={2.4}
               fill="url(#predictiveCurrentFill)"
-              strokeWidth={2.5}
-              isAnimationActive
-              animationDuration={450}
-              fillOpacity={activeIndex === null ? 1 : 0.5}
-              strokeOpacity={activeIndex === null ? 1 : 0.85}
+              activeDot={{ r: 4 }}
+              dot={(props) => {
+                const { cx, cy, index } = props;
+                if (typeof cx !== "number" || typeof cy !== "number") return null;
+                const isActive = activeIndex === index;
+                return (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={isActive ? 4.5 : 3}
+                    fill="#0f172a"
+                    stroke="#38bdf8"
+                    strokeWidth={isActive ? 3 : 2}
+                  />
+                );
+              }}
             />
 
             <Area
               type="monotone"
               dataKey="forecast"
-              name="Forecast Risk"
               stroke="#a78bfa"
+              strokeWidth={2.4}
               fill="url(#predictiveForecastFill)"
-              strokeWidth={2.5}
-              isAnimationActive
-              animationDuration={450}
-              fillOpacity={activeIndex === null ? 1 : 0.5}
-              strokeOpacity={activeIndex === null ? 1 : 0.9}
+              activeDot={{ r: 4 }}
+              dot={(props) => {
+                const { cx, cy, index } = props;
+                if (typeof cx !== "number" || typeof cy !== "number") return null;
+                const isActive = activeIndex === index;
+                return (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={isActive ? 4.5 : 3}
+                    fill="#0f172a"
+                    stroke="#a78bfa"
+                    strokeWidth={isActive ? 3 : 2}
+                  />
+                );
+              }}
             />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
-      <div
-        className="mt-2 shrink-0 pt-2"
-        style={{ minHeight: FOOTER_HEIGHT }}
-      >
+      <div className="mt-auto shrink-0 pt-2" style={{ height: FOOTER_HEIGHT }}>
         <FooterLegend />
       </div>
     </div>

@@ -17,12 +17,16 @@ import {
   getAnalyticsForecast,
   getAnalyticsOverview,
   getDashboardOverview,
+  getEmergingSignals,
   getLanePressure,
+  getMlRoutePrediction,
   getSupplierExposure,
   updateAlertStatus,
   type ApiAnalyticsOverview,
+  type ApiEmergingSignal,
   type ApiForecastPoint,
   type ApiLanePressureItem,
+  type ApiRoutePrediction,
   type ApiSupplierExposureItem,
 } from "@/lib/api";
 
@@ -45,29 +49,43 @@ function levelRank(level: AlertItem["level"]) {
 }
 
 function scoreAlert(alert: AlertItem) {
+  const finalRisk = alert.finalRiskScore ?? 0;
+  const ml = alert.mlRiskScore ?? 0;
   const weather = alert.weatherRisk ?? 0;
-  const congestion = alert.portCongestion ?? 0;
-  const delay = alert.delayHours ?? 0;
+  const news = alert.newsScore ?? 0;
+  const logistics = alert.logisticsScore ?? 0;
+  const congestion = alert.congestionScore ?? alert.portCongestion ?? 0;
 
-  return levelRank(alert.level) * 1000 + delay * 10 + weather * 100 + congestion * 100;
+  return (
+    levelRank(alert.level) * 1000 +
+    finalRisk * 10 +
+    ml * 5 +
+    weather +
+    news +
+    logistics +
+    congestion
+  );
 }
 
-function dedupeHighestRiskPerLocation(alerts: AlertItem[]) {
-  const byLocation = new Map<string, AlertItem>();
+function dedupeHighestRiskPerAnchorPort(alerts: AlertItem[]) {
+  const byAnchor = new Map<string, AlertItem>();
 
   for (const alert of alerts) {
     const [lng, lat] = alert.coordinates;
-    if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) continue;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) {
+      continue;
+    }
 
-    const key = `${alert.location}|${alert.country}`;
-    const existing = byLocation.get(key);
+    const anchor = alert.anchorPort ?? alert.destinationPort ?? alert.location;
+    const key = `${anchor}|${alert.country}`;
 
+    const existing = byAnchor.get(key);
     if (!existing || scoreAlert(alert) > scoreAlert(existing)) {
-      byLocation.set(key, alert);
+      byAnchor.set(key, alert);
     }
   }
 
-  return Array.from(byLocation.values());
+  return Array.from(byAnchor.values());
 }
 
 function matchesRegionFilter(alert: AlertItem, selectedRegion: string) {
@@ -117,6 +135,9 @@ function matchesSearchFilter(alert: AlertItem, q: string) {
     alert.summary,
     alert.status,
     alert.supplierName ?? "",
+    alert.routeKey ?? "",
+    alert.originPort ?? "",
+    alert.destinationPort ?? "",
   ]
     .join(" ")
     .toLowerCase()
@@ -144,10 +165,20 @@ export default function DashboardPage() {
   const [timeRange, setTimeRange] = useState<TimeFilter>("Last 7 Days");
   const [status, setStatus] = useState<StatusFilter>("All");
   const [midIsLoading, setMidIsLoading] = useState(true);
+
   const [forecastData, setForecastData] = useState<ApiForecastPoint[]>([]);
   const [supplierExposureData, setSupplierExposureData] = useState<ApiSupplierExposureItem[]>([]);
   const [lanePressureData, setLanePressureData] = useState<ApiLanePressureItem[]>([]);
   const [analyticsOverview, setAnalyticsOverview] = useState<ApiAnalyticsOverview | null>(null);
+
+  const [emergingSignals, setEmergingSignals] = useState<ApiEmergingSignal[]>([]);
+  const [emergingSignalsLoading, setEmergingSignalsLoading] = useState(true);
+  const [emergingSignalsError, setEmergingSignalsError] = useState<string | null>(null);
+
+  const [selectedMlPrediction, setSelectedMlPrediction] =
+    useState<ApiRoutePrediction | null>(null);
+  const [mlPredictionLoading, setMlPredictionLoading] = useState(false);
+  const [mlPredictionError, setMlPredictionError] = useState<string | null>(null);
 
   const [kpis, setKpis] = useState<
     {
@@ -172,7 +203,9 @@ export default function DashboardPage() {
       try {
         setIsLoading(true);
         setMidIsLoading(true);
+        setEmergingSignalsLoading(true);
         setError(null);
+        setEmergingSignalsError(null);
 
         const dashboardOverview = await getDashboardOverview();
         const alertSummary = await getAlertSummary();
@@ -182,6 +215,7 @@ export default function DashboardPage() {
         let forecastRes: ApiForecastPoint[] = [];
         let supplierExposureRes: ApiSupplierExposureItem[] = [];
         let lanePressureRes: ApiLanePressureItem[] = [];
+        let emergingSignalsRes: ApiEmergingSignal[] = [];
 
         try {
           analyticsOverviewRes = await getAnalyticsOverview();
@@ -207,6 +241,18 @@ export default function DashboardPage() {
           console.error("lane pressure failed", e);
         }
 
+        try {
+          emergingSignalsRes = await getEmergingSignals({
+            limit: 6,
+            relevantOnly: true,
+          });
+        } catch (e) {
+          console.error("emerging signals failed", e);
+          setEmergingSignalsError(
+            e instanceof Error ? e.message : "Failed to load emerging signals"
+          );
+        }
+
         const uiAlerts = alertsRes.map(mapApiAlertToUiAlert);
 
         setAlerts(uiAlerts);
@@ -222,20 +268,20 @@ export default function DashboardPage() {
         setForecastData(forecastRes);
         setSupplierExposureData(supplierExposureRes);
         setLanePressureData(lanePressureRes);
+        setEmergingSignals(emergingSignalsRes);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load dashboard");
       } finally {
         setIsLoading(false);
         setMidIsLoading(false);
+        setEmergingSignalsLoading(false);
       }
     }
 
     loadDashboard();
   }, []);
 
-  const normalizedSearch = useMemo(() => {
-    return search.trim().toLowerCase();
-  }, [search]);
+  const normalizedSearch = useMemo(() => search.trim().toLowerCase(), [search]);
 
   const filteredAlerts = useMemo(() => {
     return alerts.filter((alert) => {
@@ -271,13 +317,57 @@ export default function DashboardPage() {
     status,
   ]);
 
-  const visibleAlerts = useMemo(() => {
-    return filteredAlerts.filter((alert) => alert.status !== "resolved");
-  }, [filteredAlerts]);
+  const visibleAlerts = useMemo(
+    () => filteredAlerts.filter((alert) => alert.status !== "resolved"),
+    [filteredAlerts]
+  );
 
-  const selectedAlert = useMemo(() => {
-    return alerts.find((alert) => alert.id === selectedAlertId) ?? null;
-  }, [alerts, selectedAlertId]);
+  const selectedAlert = useMemo(
+    () => alerts.find((alert) => alert.id === selectedAlertId) ?? null,
+    [alerts, selectedAlertId]
+  );
+
+  useEffect(() => {
+    async function loadMlPrediction() {
+      if (!selectedAlert?.routeKey && !(selectedAlert?.originPort && selectedAlert?.destinationPort)) {
+        setSelectedMlPrediction(null);
+        setMlPredictionError(null);
+        return;
+      }
+
+      try {
+        setMlPredictionLoading(true);
+        setMlPredictionError(null);
+
+        const prediction = await getMlRoutePrediction({
+          routeKey: selectedAlert.routeKey,
+          originPort: selectedAlert.originPort,
+          destinationPort: selectedAlert.destinationPort,
+          weatherScore: selectedAlert.weatherRisk ?? 0,
+          newsScore: selectedAlert.newsScore ?? 0,
+          congestionScore: selectedAlert.congestionScore ?? 0,
+        });
+
+        setSelectedMlPrediction(prediction);
+      } catch (err) {
+        setSelectedMlPrediction(null);
+        setMlPredictionError(
+          err instanceof Error ? err.message : "Failed to load ML prediction"
+        );
+      } finally {
+        setMlPredictionLoading(false);
+      }
+    }
+
+    loadMlPrediction();
+  }, [
+    selectedAlert?.routeKey,
+    selectedAlert?.originPort,
+    selectedAlert?.destinationPort,
+    selectedAlert?.weatherRisk,
+    selectedAlert?.newsScore,
+    selectedAlert?.congestionScore,
+  ]);
 
   const mapVisibleAlerts = useMemo(() => {
     const mapCapable = visibleAlerts.filter((alert) => {
@@ -285,11 +375,14 @@ export default function DashboardPage() {
       return Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0);
     });
 
-    const deduped = dedupeHighestRiskPerLocation(mapCapable);
+    const deduped = dedupeHighestRiskPerAnchorPort(mapCapable);
 
     if (selectedAlert) {
-      const key = `${selectedAlert.location}|${selectedAlert.country}`;
-      const filtered = deduped.filter((a) => `${a.location}|${a.country}` !== key);
+      const key = `${selectedAlert.anchorPort ?? selectedAlert.destinationPort ?? selectedAlert.location}|${selectedAlert.country}`;
+      const filtered = deduped.filter(
+        (a) =>
+          `${a.anchorPort ?? a.destinationPort ?? a.location}|${a.country}` !== key
+      );
 
       const [lng, lat] = selectedAlert.coordinates;
       if (Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0)) {
@@ -302,14 +395,12 @@ export default function DashboardPage() {
     return deduped;
   }, [visibleAlerts, selectedAlert]);
 
-  const notificationAlerts = useMemo(() => {
-    return alerts.filter((alert) => alert.status === "active");
-  }, [alerts]);
+  const notificationAlerts = useMemo(
+    () => alerts.filter((alert) => alert.status === "active"),
+    [alerts]
+  );
 
-  async function handleStatusChange(
-    id: string,
-    newStatus: "acknowledged" | "resolved"
-  ) {
+  async function handleStatusChange(id: string, newStatus: "acknowledged" | "resolved") {
     try {
       await updateAlertStatus(id, newStatus);
 
@@ -414,6 +505,9 @@ export default function DashboardPage() {
                 onLevelChange={setActiveLevel}
                 onAcknowledge={(id) => handleStatusChange(id, "acknowledged")}
                 onResolve={(id) => handleStatusChange(id, "resolved")}
+                emergingSignals={emergingSignals}
+                emergingSignalsLoading={emergingSignalsLoading}
+                emergingSignalsError={emergingSignalsError}
               />
             </motion.div>
 
@@ -432,6 +526,9 @@ export default function DashboardPage() {
                       selectedAlert={selectedAlert}
                       isOpen={isRailOpen}
                       onClose={() => setSelectedAlertId(null)}
+                      mlPrediction={selectedMlPrediction}
+                      mlPredictionLoading={mlPredictionLoading}
+                      mlPredictionError={mlPredictionError}
                     />
                   </div>
                 </motion.div>
@@ -451,6 +548,9 @@ export default function DashboardPage() {
               onLevelChange={setActiveLevel}
               onAcknowledge={(id) => handleStatusChange(id, "acknowledged")}
               onResolve={(id) => handleStatusChange(id, "resolved")}
+              emergingSignals={emergingSignals}
+              emergingSignalsLoading={emergingSignalsLoading}
+              emergingSignalsError={emergingSignalsError}
             />
           </div>
 

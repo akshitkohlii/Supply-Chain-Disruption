@@ -2,13 +2,33 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
+import type { ApiRoutePrediction } from "@/lib/api";
 import type { AlertItem } from "@/lib/mappers";
 
 type RightRailProps = {
   selectedAlert: AlertItem | null;
   isOpen: boolean;
   onClose: () => void;
+  mlPrediction?: ApiRoutePrediction | null;
+  mlPredictionLoading?: boolean;
+  mlPredictionError?: string | null;
 };
+
+function getSignalSourceLabel(sourceType: "news" | "weather" | "congestion") {
+  if (sourceType === "weather") return "Weather";
+  if (sourceType === "congestion") return "Congestion";
+  return "News";
+}
+
+function getSignalSeverityUi(severity: "low" | "medium" | "high") {
+  if (severity === "high") {
+    return "border-rose-400/20 bg-rose-500/10 text-rose-300";
+  }
+  if (severity === "medium") {
+    return "border-amber-400/20 bg-amber-500/10 text-amber-300";
+  }
+  return "border-cyan-400/20 bg-cyan-500/10 text-cyan-300";
+}
 
 function getLevelUI(level: AlertItem["level"]) {
   if (level === "critical") {
@@ -42,20 +62,38 @@ function normalizeScore(value?: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function formatProbability(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "N/A";
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatDelayHours(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "N/A";
+  return `${value.toFixed(1)}h`;
+}
+
+function getPredictionBadge(predictedLabel?: string | null) {
+  if (predictedLabel === "critical") {
+    return "border-rose-400/20 bg-rose-500/10 text-rose-300";
+  }
+  if (predictedLabel === "warning") {
+    return "border-amber-400/20 bg-amber-500/10 text-amber-300";
+  }
+  return "border-cyan-400/20 bg-cyan-500/10 text-cyan-300";
+}
+
 function buildDrivers(selectedAlert: AlertItem) {
   const weather = normalizeScore(selectedAlert.weatherRisk);
   const news = normalizeScore(selectedAlert.newsScore);
   const logistics = normalizeScore(selectedAlert.logisticsScore);
   const congestion = normalizeScore(selectedAlert.congestionScore);
 
-  const drivers = [
+  return [
     { label: "News Pressure", value: news },
     { label: "Weather Exposure", value: weather },
     { label: "Logistics Pressure", value: logistics },
     { label: "Port Congestion", value: congestion },
-  ];
-
-  return drivers.sort((a, b) => b.value - a.value);
+  ].sort((a, b) => b.value - a.value);
 }
 
 function buildRiskScore(selectedAlert: AlertItem) {
@@ -68,9 +106,7 @@ function buildRiskScore(selectedAlert: AlertItem) {
   const logistics = normalizeScore(selectedAlert.logisticsScore);
   const congestion = normalizeScore(selectedAlert.congestionScore);
 
-  return Math.round(
-    weather * 0.25 + news * 0.2 + logistics * 0.3 + congestion * 0.25
-  );
+  return Math.round(weather * 0.25 + news * 0.2 + logistics * 0.3 + congestion * 0.25);
 }
 
 function buildConfidence(selectedAlert: AlertItem) {
@@ -90,6 +126,9 @@ export default function RightRail({
   selectedAlert,
   isOpen,
   onClose,
+  mlPrediction = null,
+  mlPredictionLoading = false,
+  mlPredictionError = null,
 }: RightRailProps) {
   if (!isOpen || !selectedAlert) return null;
 
@@ -97,6 +136,24 @@ export default function RightRail({
   const drivers = buildDrivers(selectedAlert);
   const riskScore = buildRiskScore(selectedAlert);
   const confidence = buildConfidence(selectedAlert);
+
+  const effectiveMlPrediction = mlPrediction
+    ? mlPrediction
+    : selectedAlert.mlRiskScore != null || selectedAlert.mlProbability != null
+      ? {
+          route_key: selectedAlert.routeKey ?? "",
+          disruption_probability: selectedAlert.mlProbability ?? 0,
+          predicted_label:
+            selectedAlert.mlRiskScore != null && selectedAlert.mlRiskScore >= 70
+              ? "critical"
+              : selectedAlert.mlRiskScore != null && selectedAlert.mlRiskScore >= 40
+                ? "warning"
+                : "stable",
+          ml_risk_score: selectedAlert.mlRiskScore ?? 0,
+          predicted_delay_hours: selectedAlert.predictedDelayHours ?? 0,
+          top_factors: selectedAlert.mlTopFactors ?? [],
+        }
+      : null;
 
   return (
     <aside className="w-full">
@@ -110,9 +167,7 @@ export default function RightRail({
           className="sticky top-4"
         >
           <div className="relative h-[39.25rem] overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl">
-            <div
-              className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${levelUI.accent}`}
-            />
+            <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${levelUI.accent}`} />
 
             <div className="relative flex h-full flex-col">
               <div className="shrink-0 border-b border-slate-800/80 px-5 py-4">
@@ -122,7 +177,7 @@ export default function RightRail({
                       Context Panel
                     </div>
                     <div className="mt-1 text-sm font-medium text-white">
-                      Selected Entity Details
+                      Selected Route Alert
                     </div>
                   </div>
 
@@ -146,7 +201,12 @@ export default function RightRail({
                           {selectedAlert.title}
                         </h3>
                         <p className="mt-1 text-xs text-slate-400">
-                          {selectedAlert.location}, {selectedAlert.country}
+                          Route: {selectedAlert.originPort ?? "Unknown"} →{" "}
+                          {selectedAlert.destinationPort ?? "Unknown"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Anchor Port: {selectedAlert.anchorPort ?? "Unknown"},{" "}
+                          {selectedAlert.country}
                         </p>
                       </div>
 
@@ -157,9 +217,7 @@ export default function RightRail({
                       </span>
                     </div>
 
-                    <p className="mt-3 text-xs leading-6 text-slate-300">
-                      {selectedAlert.summary}
-                    </p>
+                    <p className="mt-3 text-xs leading-6 text-slate-300">{selectedAlert.summary}</p>
                   </section>
 
                   <section className="grid grid-cols-2 gap-3">
@@ -167,60 +225,61 @@ export default function RightRail({
                       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                         Risk Score
                       </div>
-                      <div className="mt-2 text-2xl font-semibold text-white">
-                        {riskScore}
-                      </div>
+                      <div className="mt-2 text-2xl font-semibold text-white">{riskScore}</div>
                     </div>
 
                     <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                         Confidence
                       </div>
-                      <div className="mt-2 text-2xl font-semibold text-white">
-                        {confidence}%
-                      </div>
+                      <div className="mt-2 text-2xl font-semibold text-white">{confidence}%</div>
                     </div>
                   </section>
 
                   <section className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      Alert Metadata
+                      Route Metadata
                     </div>
 
                     <div className="mt-4 space-y-3 text-xs text-slate-300">
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-slate-500">Category</span>
-                        <span className="font-medium capitalize text-white">
-                          {selectedAlert.category}
-                        </span>
+                        <span className="font-medium capitalize text-white">{selectedAlert.category}</span>
                       </div>
 
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-slate-500">Status</span>
-                        <span className="font-medium capitalize text-white">
-                          {selectedAlert.status}
-                        </span>
+                        <span className="font-medium capitalize text-white">{selectedAlert.status}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Route Key</span>
+                        <span className="font-medium text-right text-white">{selectedAlert.routeKey ?? "N/A"}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Origin Port</span>
+                        <span className="font-medium text-white">{selectedAlert.originPort ?? "N/A"}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Destination Port</span>
+                        <span className="font-medium text-white">{selectedAlert.destinationPort ?? "N/A"}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Anchor Port</span>
+                        <span className="font-medium text-white">{selectedAlert.anchorPort ?? "N/A"}</span>
                       </div>
 
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-slate-500">Region</span>
-                        <span className="font-medium text-white">
-                          {selectedAlert.region ?? "Unknown"}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-slate-500">Supplier</span>
-                        <span className="font-medium text-white">
-                          {selectedAlert.supplierName ?? "N/A"}
-                        </span>
+                        <span className="font-medium text-white">{selectedAlert.region ?? "Unknown"}</span>
                       </div>
 
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-slate-500">Timestamp</span>
-                        <span className="font-medium text-white">
-                          {selectedAlert.timestamp}
-                        </span>
+                        <span className="font-medium text-white">{selectedAlert.timestamp}</span>
                       </div>
                     </div>
                   </section>
@@ -299,6 +358,152 @@ export default function RightRail({
                         </span>
                       </div>
                     </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                      Emerging Signal Impact
+                    </div>
+
+                    <div className="mt-4 space-y-3 text-xs text-slate-300">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Emerging Boost</span>
+                        <span className="font-medium text-white">
+                          {typeof selectedAlert.emergingScore === "number"
+                            ? `${selectedAlert.emergingScore}`
+                            : "N/A"}
+                        </span>
+                      </div>
+
+                      {!selectedAlert.emergingSignals?.length ? (
+                        <div className="text-slate-400">
+                          No emerging signals linked to this route.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {selectedAlert.emergingSignals.slice(0, 3).map((signal) => (
+                            <div
+                              key={signal.signalId}
+                              className="rounded-xl border border-slate-800/70 bg-slate-900/45 px-3 py-2"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="truncate text-slate-100">
+                                    {signal.title ??
+                                      `${getSignalSourceLabel(signal.sourceType)} signal`}
+                                  </div>
+                                  <div className="mt-1 text-[11px] text-slate-500">
+                                    {getSignalSourceLabel(signal.sourceType)}
+                                    {signal.portName ? ` • ${signal.portName}` : ""}
+                                  </div>
+                                </div>
+
+                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${getSignalSeverityUi(
+                                      signal.severity
+                                    )}`}
+                                  >
+                                    {signal.severity}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400">
+                                    +{signal.impactScore}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                      ML Outlook
+                    </div>
+
+                    {mlPredictionLoading ? (
+                      <div className="mt-4 text-xs text-slate-400">Loading ML prediction...</div>
+                    ) : mlPredictionError ? (
+                      <div className="mt-4 text-xs text-rose-300">{mlPredictionError}</div>
+                    ) : effectiveMlPrediction ? (
+                      <div className="mt-4 space-y-3 text-xs text-slate-300">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-slate-500">Predicted State</span>
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] ${getPredictionBadge(
+                              effectiveMlPrediction.predicted_label
+                            )}`}
+                          >
+                            {effectiveMlPrediction.predicted_label}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-slate-500">Disruption Probability</span>
+                          <span className="font-medium text-white">
+                            {formatProbability(effectiveMlPrediction.disruption_probability)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-slate-500">ML Risk Score</span>
+                          <span className="font-medium text-white">
+                            {effectiveMlPrediction.ml_risk_score}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-slate-500">Predicted Delay</span>
+                          <span className="font-medium text-white">
+                            {formatDelayHours(effectiveMlPrediction.predicted_delay_hours)}
+                          </span>
+                        </div>
+
+                        <div>
+                          <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                            <span className="text-slate-500">ML Confidence Bar</span>
+                            <span className="font-medium text-white">
+                              {effectiveMlPrediction.ml_risk_score} / 100
+                            </span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-800/80">
+                            <div
+                              className={`h-full rounded-full ${getBarColor(
+                                effectiveMlPrediction.ml_risk_score
+                              )}`}
+                              style={{ width: `${effectiveMlPrediction.ml_risk_score}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="pt-2">
+                          <div className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                            Top Factors
+                          </div>
+
+                          {effectiveMlPrediction.top_factors?.length ? (
+                            <div className="space-y-2">
+                              {effectiveMlPrediction.top_factors.map((factor, index) => (
+                                <div
+                                  key={`${factor}-${index}`}
+                                  className="rounded-xl border border-slate-800/70 bg-slate-900/50 px-3 py-2 text-slate-200"
+                                >
+                                  {factor}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-slate-400">No factor explanations available.</div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 text-xs text-slate-400">
+                        No ML prediction available for this route.
+                      </div>
+                    )}
                   </section>
                 </div>
               </div>

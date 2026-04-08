@@ -1,7 +1,17 @@
-from app.core.database import db
+from app.core.database import get_database
+
+
+def _band(score: float) -> str:
+    if score >= 70:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"
 
 
 async def get_suppliers_overview():
+    db = get_database()
+
     total_suppliers = len(await db.shipments_raw.distinct("supplier_id"))
 
     pipeline = [
@@ -11,111 +21,70 @@ async def get_suppliers_overview():
                 "supplier_name": {"$first": "$supplier_name"},
                 "supplier_country": {"$first": "$supplier_country"},
                 "supplier_region": {"$first": "$supplier_region"},
-                "avg_delay_hours": {"$avg": "$delay_hours"},
-                "avg_inventory_level": {"$avg": "$inventory_level"},
-                "avg_lead_time": {"$avg": "$supplier_lead_time"},
-                "shipment_count": {"$sum": 1}
-            }
-        },
-        {
-            "$addFields": {
-                "risk_score": {
-                    "$round": [
-                        {
-                            "$min": [
-                                100,
-                                {
-                                    "$add": [
-                                        {"$multiply": ["$avg_delay_hours", 2.0]},
-                                        {"$multiply": ["$avg_lead_time", 1.2]},
-                                        {
-                                            "$multiply": [
-                                                {
-                                                    "$max": [
-                                                        0,
-                                                        {
-                                                            "$subtract": [
-                                                                1,
-                                                                {"$divide": ["$avg_inventory_level", 1000]}
-                                                            ]
-                                                        }
-                                                    ]
-                                                },
-                                                25
-                                            ]
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        2
-                    ]
+                "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
+                "avg_inventory_level": {"$avg": {"$ifNull": ["$inventory_level", 0]}},
+                "avg_customs_clearance_hours": {
+                    "$avg": {"$ifNull": ["$customs_clearance_hours", 0]}
                 },
-                "dependency_score": {
-                    "$round": [
-                        {
-                            "$min": [
-                                100,
-                                {
-                                    "$add": [
-                                        {
-                                            "$multiply": [
-                                                {"$divide": ["$shipment_count", 300]},
-                                                60
-                                            ]
-                                        },
-                                        {
-                                            "$multiply": [
-                                                {"$divide": ["$avg_lead_time", 30]},
-                                                40
-                                            ]
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        2
-                    ]
-                }
+                "avg_demand_volatility": {
+                    "$avg": {"$ifNull": ["$demand_volatility", 0]}
+                },
+                "avg_order_value": {"$avg": {"$ifNull": ["$order_value", 0]}},
+                "shipment_count": {"$sum": 1},
             }
-        },
-        {"$sort": {"risk_score": -1}}
+        }
     ]
 
-    suppliers = await db.shipments_raw.aggregate(pipeline).to_list(None)
+    rows = await db.shipments_raw.aggregate(pipeline).to_list(length=5000)
 
-    high_risk_suppliers = len(
-        [supplier for supplier in suppliers if supplier["risk_score"] > 70]
-    )
+    suppliers = []
+    for row in rows:
+        avg_delay = float(row.get("avg_delay_hours") or 0)
+        avg_inventory = float(row.get("avg_inventory_level") or 0)
+        avg_customs = float(row.get("avg_customs_clearance_hours") or 0)
+        avg_volatility = float(row.get("avg_demand_volatility") or 0)
+        shipment_count = int(row.get("shipment_count") or 0)
 
-    medium_risk_suppliers = len(
-        [
-            supplier
-            for supplier in suppliers
-            if 40 < supplier["risk_score"] <= 70
-        ]
-    )
+        risk_score = min(
+            100.0,
+            (avg_delay * 1.8)
+            + (avg_customs * 0.9)
+            + max(0.0, (1 - min(avg_inventory / 1000.0, 1.0)) * 22)
+            + (avg_volatility * 35),
+        )
 
-    low_risk_suppliers = len(
-        [supplier for supplier in suppliers if supplier["risk_score"] <= 40]
-    )
+        dependency_score = min(
+            100.0,
+            (shipment_count / 300.0) * 70 + (avg_customs / 48.0) * 30,
+        )
+
+        suppliers.append(
+            {
+                "supplier_id": str(row.get("_id")),
+                "supplier_name": row.get("supplier_name") or str(row.get("_id")),
+                "supplier_country": row.get("supplier_country") or "Unknown",
+                "supplier_region": row.get("supplier_region") or "Unknown",
+                "avg_delay_hours": round(avg_delay, 2),
+                "avg_inventory_level": round(avg_inventory, 2),
+                "avg_lead_time": round(avg_customs, 2),
+                "shipment_count": shipment_count,
+                "risk_score": round(risk_score, 2),
+                "dependency_score": round(dependency_score, 2),
+                "risk_band": _band(risk_score),
+            }
+        )
+
+    suppliers.sort(key=lambda x: x["risk_score"], reverse=True)
+
+    high_risk_suppliers = len([s for s in suppliers if s["risk_band"] == "high"])
+    medium_risk_suppliers = len([s for s in suppliers if s["risk_band"] == "medium"])
+    low_risk_suppliers = len([s for s in suppliers if s["risk_band"] == "low"])
 
     avg_risk_score = (
-        round(sum(supplier["risk_score"] for supplier in suppliers) / len(suppliers), 2)
+        round(sum(s["risk_score"] for s in suppliers) / len(suppliers), 2)
         if suppliers
         else 0
     )
-
-    for supplier in suppliers:
-        score = supplier["risk_score"]
-        if score > 70:
-            supplier["risk_band"] = "high"
-        elif score > 40:
-            supplier["risk_band"] = "medium"
-        else:
-            supplier["risk_band"] = "low"
-
-        supplier["supplier_id"] = supplier.pop("_id")
 
     return {
         "total_suppliers": total_suppliers,
@@ -123,5 +92,5 @@ async def get_suppliers_overview():
         "medium_risk_suppliers": medium_risk_suppliers,
         "low_risk_suppliers": low_risk_suppliers,
         "avg_risk_score": avg_risk_score,
-        "suppliers": suppliers
+        "suppliers": suppliers[:20],
     }

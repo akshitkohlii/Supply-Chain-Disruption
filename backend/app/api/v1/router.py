@@ -9,6 +9,9 @@ from app.api.v1.logistics import router as logistics_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.mitigation import router as mitigation_router
 from app.api.v1.signals import router as signals_router
+from app.api.v1.ml import router as ml_router
+from app.api.v1.emerging_ml import router as emerging_ml_router
+from app.api.v1.emerging_signals import router as emerging_signals_router
 
 api_router = APIRouter()
 
@@ -21,3 +24,6 @@ api_router.include_router(logistics_router, prefix="/logistics", tags=["logistic
 api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(mitigation_router, prefix="/mitigation", tags=["mitigation"])
 api_router.include_router(signals_router, prefix="/signals", tags=["signals"])
+api_router.include_router(ml_router, prefix="/ml", tags=["ml"])
+api_router.include_router(emerging_ml_router, prefix="/emerging-ml", tags=["emerging-ml"])
+api_router.include_router(emerging_signals_router, prefix="/emerging-signals", tags=["emerging-signals"])

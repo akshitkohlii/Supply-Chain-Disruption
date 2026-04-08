@@ -219,7 +219,7 @@ export default function SupplierRiskChart({
               barSize={12}
               barGap={6}
               barCategoryGap={12}
-              margin={{ top: 0, right: CHART_RIGHT, bottom: 0, left: 6 }}
+              margin={{ top: 0, right: CHART_RIGHT, bottom: 0, left: 18 }}
             >
               <CartesianGrid
                 stroke="rgba(71,85,105,0.14)"

@@ -41,12 +41,18 @@ def _build_alert_summary(route: Dict[str, Any], scores: Dict[str, Any]) -> str:
     news = int(scores.get("news", 0) or 0)
     logistics = int(scores.get("logistics", 0) or 0)
     congestion = int(scores.get("congestion", 0) or 0)
+    emerging = int(scores.get("emerging", 0) or 0)
     final_risk = int(scores.get("final_risk", 0) or 0)
 
-    return (
+    summary = (
         f"Route risk score is {final_risk}. "
-        f"Weather={weather}, News={news}, Logistics={logistics}, Congestion={congestion}."
+        f"Weather={weather}, News={news}, Logistics={logistics}, Congestion={congestion}"
     )
+
+    if emerging > 0:
+        summary += f", Emerging={emerging}"
+
+    return summary + "."
 
 
 def _alert_level_from_route(route: Dict[str, Any]) -> str:
@@ -56,12 +62,14 @@ def _alert_level_from_route(route: Dict[str, Any]) -> str:
     weather = int(scores.get("weather", 0) or 0)
     logistics = int(scores.get("logistics", 0) or 0)
     congestion = int(scores.get("congestion", 0) or 0)
+    emerging = int(scores.get("emerging", 0) or 0)
 
-    if final_risk >= 65:
+    if final_risk >= 60 or emerging >= 70:
         return "critical"
 
     if (
-        final_risk >= 35
+        final_risk >= 30
+        or emerging >= 35
         or (news >= 80 and (logistics >= 30 or congestion >= 30))
         or (weather >= 80 and congestion >= 30)
         or logistics >= 60
@@ -79,41 +87,46 @@ def _should_create_alert(route: Dict[str, Any]) -> bool:
     weather = int(scores.get("weather", 0) or 0)
     logistics = int(scores.get("logistics", 0) or 0)
     congestion = int(scores.get("congestion", 0) or 0)
+    ml = int(scores.get("ml", 0) or 0)
+    emerging = int(scores.get("emerging", 0) or 0)
 
     return (
-        final_risk >= 35
-        or (news >= 70 and (logistics >= 25 or congestion >= 25))
-        or (weather >= 70 and congestion >= 25)
-        or logistics >= 60
-        or congestion >= 60
+        final_risk >= 30
+        or news >= 50
+        or weather >= 50
+        or logistics >= 45
+        or congestion >= 45
+        or ml >= 50
+        or emerging >= 35
     )
 
 
-async def _get_port_coordinates(port_name: Optional[str]) -> Tuple[Optional[float], Optional[float], Optional[str]]:
-    if not port_name:
+async def _get_port_coordinates(preferred_port: Optional[str]) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    if not preferred_port:
         return None, None, None
 
     db = get_database()
-    port = await db.ports_master.find_one({"port_name": port_name})
-    if not port:
+    port_doc = await db.ports_master.find_one({"port_name": preferred_port})
+    if not port_doc:
         return None, None, None
 
-    return port.get("lat"), port.get("lng"), port.get("country")
+    return (
+        port_doc.get("lat"),
+        port_doc.get("lng"),
+        port_doc.get("country"),
+    )
 
 
-async def _build_alert_doc(route: Dict[str, Any]) -> Dict[str, Any]:
+def _build_alert_doc(route: Dict[str, Any]) -> Dict[str, Any]:
     scores = route.get("scores", {}) or {}
+    ml_prediction = route.get("ml_prediction", {}) or {}
+    emerging_impact = route.get("emerging_impact", {}) or {}
+
     category = _category_from_scores(scores)
-    level = _alert_level_from_route(route)
-    route_key = route.get("route_key") or route.get("entity_id")
 
-    origin = route.get("origin_port")
-    destination = route.get("destination_port")
-
-    preferred_port = destination or origin
-    lat, lng, country = await _get_port_coordinates(preferred_port)
-
-    now = datetime.now(timezone.utc)
+    origin_port = route.get("origin_port")
+    destination_port = route.get("destination_port")
+    route_key = route.get("route_key")
 
     return {
         "alert_id": f"route::{route_key}",
@@ -123,92 +136,121 @@ async def _build_alert_doc(route: Dict[str, Any]) -> Dict[str, Any]:
         "title": _build_alert_title(route, category),
         "summary": _build_alert_summary(route, scores),
         "category": category,
-        "level": level,
+        "level": _alert_level_from_route(route),
         "status": "active",
-        "timestamp": now,
-        "location": f"{origin} → {destination}",
-        "origin_port": origin,
-        "destination_port": destination,
+        "timestamp": route.get("snapshot_time") or datetime.now(timezone.utc),
+        "location": f"{origin_port or 'Unknown'} → {destination_port or 'Unknown'}",
+        "origin_port": origin_port,
+        "destination_port": destination_port,
         "risk_score": int(scores.get("final_risk", 0) or 0),
         "scores": {
             "weather": int(scores.get("weather", 0) or 0),
             "news": int(scores.get("news", 0) or 0),
             "logistics": int(scores.get("logistics", 0) or 0),
             "congestion": int(scores.get("congestion", 0) or 0),
+            "emerging": int(scores.get("emerging", 0) or 0),
+            "ml": int(scores.get("ml", 0) or 0),
             "final_risk": int(scores.get("final_risk", 0) or 0),
         },
-        "top_drivers": route.get("top_drivers", []),
-        "lat": lat,
-        "lng": lng,
-        "country": country or "Unknown",
-        "updated_at": now,
+        "ml_prediction": {
+            "disruption_probability": float(
+                ml_prediction.get("disruption_probability", 0) or 0
+            ),
+            "ml_risk_score": int(ml_prediction.get("ml_risk_score", 0) or 0),
+            "predicted_delay_hours": float(
+                ml_prediction.get("predicted_delay_hours", 0) or 0
+            ),
+            "top_factors": list(ml_prediction.get("top_factors", []) or []),
+        },
+        "emerging_impact": {
+            "score": int(emerging_impact.get("score", 0) or 0),
+            "top_ports": list(emerging_impact.get("top_ports", []) or []),
+            "signals": list(emerging_impact.get("signals", []) or []),
+        },
+        "top_drivers": list(route.get("top_drivers", []) or []),
+        "updated_at": route.get("snapshot_time") or datetime.now(timezone.utc),
     }
 
 
-async def generate_alerts_from_route_snapshots() -> Dict[str, Any]:
+async def generate_alerts_from_snapshots() -> Dict[str, Any]:
     db = get_database()
 
-    latest_snapshots = await db.risk_snapshots.find(
-        {"entity_type": "route"}
-    ).sort("snapshot_time", -1).to_list(length=5000)
+    snapshots = (
+        await db.risk_snapshots.find({"entity_type": "route"})
+        .sort("snapshot_time", -1)
+        .to_list(length=5000)
+    )
 
-    latest_by_route: Dict[str, Dict[str, Any]] = {}
-    for snapshot in latest_snapshots:
-        route_key = snapshot.get("route_key") or snapshot.get("entity_id")
-        if route_key and route_key not in latest_by_route:
-            latest_by_route[route_key] = snapshot
+    await db.alerts.delete_many({})
 
-    created_or_updated = 0
+    inserted = 0
     skipped = 0
+    processed_route_keys = set()
 
-    for _, snapshot in latest_by_route.items():
-        if not _should_create_alert(snapshot):
+    for route in snapshots:
+        route_key = route.get("route_key")
+        if not route_key or route_key in processed_route_keys:
+            continue
+
+        processed_route_keys.add(route_key)
+
+        if not _should_create_alert(route):
             skipped += 1
             continue
 
-        alert_doc = await _build_alert_doc(snapshot)
+        alert_doc = _build_alert_doc(route)
 
-        await db.alerts.update_one(
-            {"alert_id": alert_doc["alert_id"]},
-            {"$set": alert_doc},
-            upsert=True,
-        )
-        created_or_updated += 1
+        preferred_port = route.get("destination_port") or route.get("origin_port")
+        lat, lng, country = await _get_port_coordinates(preferred_port)
+
+        if lat is not None:
+            alert_doc["lat"] = lat
+        if lng is not None:
+            alert_doc["lng"] = lng
+        if country:
+            alert_doc["country"] = country
+
+        await db.alerts.insert_one(alert_doc)
+        inserted += 1
 
     return {
         "success": True,
-        "routes_evaluated": len(latest_by_route),
-        "alerts_upserted": created_or_updated,
+        "routes_evaluated": len(processed_route_keys),
+        "alerts_upserted": inserted,
         "skipped": skipped,
     }
 
 
-async def get_all_alerts(limit: int = 50) -> List[Dict[str, Any]]:
+async def list_alerts(limit: int = 50) -> List[Dict[str, Any]]:
     db = get_database()
-    cursor = db.alerts.find({}).sort(
-        [("risk_score", -1), ("timestamp", -1)]
-    ).limit(limit)
-
-    alerts = await cursor.to_list(length=limit)
-    return [_serialize_doc(alert) for alert in alerts]
+    docs = (
+        await db.alerts.find({})
+        .sort("timestamp", -1)
+        .limit(limit)
+        .to_list(length=limit)
+    )
+    return [_serialize_doc(doc) for doc in docs]
 
 
 async def get_alert_summary() -> Dict[str, Any]:
     db = get_database()
+    alerts = await db.alerts.find({}).to_list(length=5000)
 
-    total_alerts = await db.alerts.count_documents({})
-    active_alerts = await db.alerts.count_documents({"status": "active"})
-    critical_alerts = await db.alerts.count_documents({"level": "critical"})
-    warning_alerts = await db.alerts.count_documents({"level": "warning"})
+    total_alerts = len(alerts)
+    active_alerts = sum(1 for a in alerts if a.get("status") == "active")
+    critical_alerts = sum(1 for a in alerts if a.get("level") == "critical")
+    warning_alerts = sum(1 for a in alerts if a.get("level") == "warning")
 
-    top_category_pipeline = [
-        {"$group": {"_id": "$category", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 1},
-    ]
+    category_counts: Dict[str, int] = {}
+    for alert in alerts:
+        category = alert.get("category", "unknown")
+        category_counts[category] = category_counts.get(category, 0) + 1
 
-    result = await db.alerts.aggregate(top_category_pipeline).to_list(1)
-    top_category = result[0]["_id"] if result else "N/A"
+    top_category = (
+        max(category_counts.items(), key=lambda x: x[1])[0]
+        if category_counts
+        else "none"
+    )
 
     return {
         "total_alerts": total_alerts,
@@ -219,10 +261,21 @@ async def get_alert_summary() -> Dict[str, Any]:
     }
 
 
-async def update_alert_status(alert_id: str, status: str) -> bool:
+async def update_alert_status(alert_id: str, status: str) -> Dict[str, Any]:
     db = get_database()
-    result = await db.alerts.update_one(
+
+    await db.alerts.update_one(
         {"alert_id": alert_id},
-        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
+        {
+            "$set": {
+                "status": status,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
     )
-    return result.modified_count > 0
+
+    return {
+        "message": "Alert status updated successfully",
+        "alert_id": alert_id,
+        "status": status,
+    }

@@ -163,10 +163,41 @@ export type ApiAlert = {
     news: number;
     logistics: number;
     congestion: number;
+    emerging?: number;
     final_risk: number;
+    ml?: number;
+  };
+  ml_prediction?: {
+    disruption_probability: number;
+    ml_risk_score: number;
+    predicted_delay_hours?: number;
+    top_factors?: string[];
+  };
+  emerging_impact?: {
+    score: number;
+    top_ports?: string[];
+    signals?: Array<{
+      signal_id: string;
+      source_type: "news" | "weather" | "congestion";
+      risk_type?: string;
+      severity: "low" | "medium" | "high";
+      port_name?: string;
+      emerging_score?: number;
+      impact_score: number;
+      title?: string;
+    }>;
   };
   top_drivers?: string[];
   updated_at?: string;
+};
+
+export type ApiRoutePrediction = {
+  route_key: string;
+  disruption_probability: number;
+  predicted_label: "stable" | "warning" | "critical";
+  ml_risk_score: number;
+  predicted_delay_hours: number;
+  top_factors: string[];
 };
 
 export async function getDashboardOverview() {
@@ -230,4 +261,62 @@ export async function generateAlerts() {
   }>("/alerts/generate", {
     method: "POST",
   });
+}
+
+export async function getMlRoutePrediction(params: {
+  routeKey?: string;
+  originPort?: string;
+  destinationPort?: string;
+  weatherScore?: number;
+  newsScore?: number;
+  congestionScore?: number;
+}) {
+  const search = new URLSearchParams();
+
+  if (params.routeKey) search.set("route_key", params.routeKey);
+  if (params.originPort) search.set("origin_port", params.originPort);
+  if (params.destinationPort) search.set("destination_port", params.destinationPort);
+
+  search.set("weather_score", String(params.weatherScore ?? 0));
+  search.set("news_score", String(params.newsScore ?? 0));
+  search.set("congestion_score", String(params.congestionScore ?? 0));
+
+  return apiFetch<ApiRoutePrediction>(`/ml/predict-route?${search.toString()}`);
+}
+
+export type ApiEmergingSignal = {
+  _id?: string;
+  signal_id: string;
+  source_signal_id?: string;
+  source_type: "news" | "weather" | "congestion";
+  title: string;
+  summary: string;
+  port_name?: string;
+  country?: string;
+  lat?: number;
+  lng?: number;
+  is_relevant: boolean;
+  relevance_probability: number;
+  emerging_score: number;
+  risk_type: "weather" | "geo" | "logistics" | "congestion" | "mixed";
+  severity: "low" | "medium" | "high";
+  created_at?: string;
+  updated_at?: string;
+};
+
+export async function getEmergingSignals(params?: {
+  limit?: number;
+  relevantOnly?: boolean;
+  sourceType?: "news" | "weather" | "congestion";
+}) {
+  const search = new URLSearchParams();
+
+  search.set("limit", String(params?.limit ?? 6));
+  search.set("relevant_only", String(params?.relevantOnly ?? true));
+
+  if (params?.sourceType) {
+    search.set("source_type", params.sourceType);
+  }
+
+  return apiFetch<ApiEmergingSignal[]>(`/emerging-signals?${search.toString()}`);
 }

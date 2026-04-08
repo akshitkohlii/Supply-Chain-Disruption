@@ -9,6 +9,9 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import type {
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
 import type { ApiLanePressureItem } from "@/lib/api";
 import ChartTooltip from "./ChartTooltip";
 
@@ -18,34 +21,26 @@ type LogisticTransportChartProps = {
 };
 
 const CARD_HEIGHT = 320;
-const FOOTER_HEIGHT = 32;
+const FOOTER_HEIGHT = 36;
 
 const PRESSURE_COLOR = "#fb7185";
 const THROUGHPUT_COLOR = "#22d3ee";
 
-const PORT_CODE_MAP: Record<string, string> = {
-  "Los Angeles": "LA",
-  Shanghai: "SH",
-  Mumbai: "MB",
-  Busan: "BS",
-  Hamburg: "HB",
-};
-
 function shortLaneLabel(lane: string) {
-  const parts = lane.split(" → ");
+  const parts = lane.split("→").map((p) => p.trim());
+  if (parts.length !== 2) return lane;
 
-  if (parts.length === 2) {
-    const from = parts[0].replace(" Port", "").trim();
-    const to = parts[1].replace(" Port", "").trim();
+  const shorten = (port: string) =>
+    port.replace(" Port", "").split(" ")[0].slice(0, 3).toUpperCase();
 
-    const fromCode = PORT_CODE_MAP[from] ?? from.slice(0, 2).toUpperCase();
-    const toCode = PORT_CODE_MAP[to] ?? to.slice(0, 2).toUpperCase();
+  return `${shorten(parts[0])}→${shorten(parts[1])}`;
+}
 
-    return `${fromCode} → ${toCode}`;
+function getNumericTooltipValue(value: ValueType | undefined) {
+  if (Array.isArray(value)) {
+    return Number(value[0] ?? 0);
   }
-
-  const cleaned = lane.replace(/ Port/g, "").trim();
-  return PORT_CODE_MAP[cleaned] ?? cleaned.slice(0, 2).toUpperCase();
+  return Number(value ?? 0);
 }
 
 function FooterLegend() {
@@ -53,25 +48,17 @@ function FooterLegend() {
     <div className="flex items-center justify-between gap-4 text-[11px] text-slate-400">
       <div className="flex items-center gap-5">
         <div className="flex items-center gap-2">
-          <span
-            className="h-3 w-3 rounded-full"
-            style={{ backgroundColor: PRESSURE_COLOR }}
-          />
+          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: PRESSURE_COLOR }} />
           <span>Pressure Score</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <span
-            className="h-3 w-3 rounded-full"
-            style={{ backgroundColor: THROUGHPUT_COLOR }}
-          />
+          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: THROUGHPUT_COLOR }} />
           <span>Throughput</span>
         </div>
       </div>
 
-      <div className="whitespace-nowrap text-right text-slate-500">
-        Top active lanes
-      </div>
+      <div className="whitespace-nowrap text-right text-slate-500">Top active lanes</div>
     </div>
   );
 }
@@ -106,6 +93,8 @@ export default function LogisticTransportChart({
     lane: item.lane,
     pressure: Number(item.pressure_score.toFixed(1)),
     throughput: Number(item.throughput_pct.toFixed(1)),
+    avgDelay: Number(item.avg_delay_hours.toFixed(1)),
+    shipmentCount: item.shipment_count,
   }));
 
   return (
@@ -114,8 +103,8 @@ export default function LogisticTransportChart({
         <ResponsiveContainer width="100%" height={CARD_HEIGHT - FOOTER_HEIGHT - 24}>
           <BarChart
             data={chartData}
-            barGap={10}
-            barCategoryGap={24}
+            barGap={6}
+            barCategoryGap={12}
             margin={{ top: 0, right: 8, bottom: 0, left: -4 }}
           >
             <CartesianGrid
@@ -130,50 +119,46 @@ export default function LogisticTransportChart({
               tick={{ fill: "#94a3b8", fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              height={38}
-              dy={6}
+              height={42}
+              dy={8}
               dx={-8}
-              angle={-25}
-              tickFormatter={(value) => shortLaneLabel(String(value))}
+              angle={-20}
+              tickFormatter={shortLaneLabel}
             />
 
             <YAxis
-              domain={[0, 100]}
-              width={40}
-              tick={{ fill: "#94a3b8", fontSize: 11, fillOpacity:0.7 }}
+              tick={{ fill: "#94a3b8", fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              tickCount={5}
+              width={34}
+              domain={[0, 100]}
             />
 
             <Tooltip
+              cursor={{ fill: "rgba(15,23,42,0.35)" }}
               content={<ChartTooltip />}
-              cursor={{ fill: "rgba(148,163,184,0.05)" }}
             />
 
             <Bar
               dataKey="pressure"
-              name="Pressure Score"
+              name="pressure"
               fill={PRESSURE_COLOR}
-              radius={[6, 6, 0, 0]}
-              barSize={14}
+              radius={[10, 10, 0, 0]}
+              maxBarSize={40}
             />
 
             <Bar
               dataKey="throughput"
-              name="Throughput"
+              name="throughput"
               fill={THROUGHPUT_COLOR}
-              radius={[6, 6, 0, 0]}
-              barSize={14}
+              radius={[10, 10, 0, 0]}
+              maxBarSize={40}
             />
           </BarChart>
         </ResponsiveContainer>
       </div>
 
-      <div
-        className="mt-2 shrink-0 pt-3"
-        style={{ minHeight: FOOTER_HEIGHT }}
-      >
+      <div className="mt-auto shrink-0 pt-4" style={{ height: FOOTER_HEIGHT }}>
         <FooterLegend />
       </div>
     </div>

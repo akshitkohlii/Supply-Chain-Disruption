@@ -25,7 +25,24 @@ export type AlertItem = {
   newsScore?: number;
   logisticsScore?: number;
   congestionScore?: number;
+  emergingScore?: number;
+  emergingSignals?: Array<{
+    signalId: string;
+    sourceType: "news" | "weather" | "congestion";
+    severity: "low" | "medium" | "high";
+    portName?: string;
+    impactScore: number;
+    title?: string;
+  }>;
   finalRiskScore?: number;
+  mlRiskScore?: number;
+  mlProbability?: number;
+  predictedDelayHours?: number;
+  mlTopFactors?: string[];
+  routeKey?: string;
+  originPort?: string;
+  destinationPort?: string;
+  anchorPort?: string;
   isMapBacked?: boolean;
 };
 
@@ -80,7 +97,25 @@ export function mapApiAlertToUiAlert(alert: ApiAlert): AlertItem {
     newsScore: alert.scores?.news,
     logisticsScore: alert.scores?.logistics,
     congestionScore: alert.scores?.congestion,
+    emergingScore: alert.scores?.emerging,
+    emergingSignals:
+      alert.emerging_impact?.signals?.map((signal) => ({
+        signalId: signal.signal_id,
+        sourceType: signal.source_type,
+        severity: signal.severity,
+        portName: signal.port_name,
+        impactScore: signal.impact_score,
+        title: signal.title,
+      })) ?? [],
     finalRiskScore: alert.scores?.final_risk,
+    mlRiskScore: alert.scores?.ml ?? alert.ml_prediction?.ml_risk_score,
+    mlProbability: alert.ml_prediction?.disruption_probability,
+    predictedDelayHours: alert.ml_prediction?.predicted_delay_hours,
+    mlTopFactors: alert.ml_prediction?.top_factors ?? [],
+    routeKey: alert.route_key,
+    originPort: alert.origin_port,
+    destinationPort: alert.destination_port,
+    anchorPort: alert.destination_port ?? alert.origin_port,
     isMapBacked: true,
   };
 }
@@ -125,6 +160,14 @@ export function mapApiMapPointToUiAlert(point: ApiMapPoint): AlertItem | null {
     logisticsScore: undefined,
     congestionScore: undefined,
     finalRiskScore: undefined,
+    mlRiskScore: undefined,
+    mlProbability: undefined,
+    predictedDelayHours: undefined,
+    mlTopFactors: [],
+    routeKey: undefined,
+    originPort: undefined,
+    destinationPort: point.name,
+    anchorPort: point.name,
     isMapBacked: true,
   };
 }
