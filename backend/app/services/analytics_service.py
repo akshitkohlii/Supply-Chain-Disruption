@@ -1,337 +1,241 @@
-from app.core.database import db
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, List, Optional
+
+from app.core.database import get_database
 
 
-DAY_NAME_MAP = {
-    1: "Sunday",
-    2: "Monday",
-    3: "Tuesday",
-    4: "Wednesday",
-    5: "Thursday",
-    6: "Friday",
-    7: "Saturday",
-}
-
-DAY_ORDER = {
-    "Monday": 1,
-    "Tuesday": 2,
-    "Wednesday": 3,
-    "Thursday": 4,
-    "Friday": 5,
-    "Saturday": 6,
-    "Sunday": 7,
-}
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
-async def get_analytics_overview():
-    pipeline = [
-        {
-            "$group": {
-                "_id": None,
-                "avg_delay_hours": {"$avg": "$delay_hours"},
-                "avg_inventory_level": {"$avg": "$inventory_level"},
-                "avg_expected_time": {"$avg": "$expected_time_hours"},
-                "avg_weather_risk": {"$avg": "$weather_risk"},
-                "avg_port_congestion": {"$avg": "$port_congestion"},
-            }
-        }
-    ]
+def _latest_route_snapshots_by_key(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    latest: Dict[str, Dict[str, Any]] = {}
 
-    result = await db.shipments_raw.aggregate(pipeline).to_list(1)
+    for doc in docs:
+        route_key = doc.get("route_key") or doc.get("entity_id")
+        if not route_key:
+            continue
+        if route_key not in latest:
+            latest[route_key] = doc
 
-    if not result:
-        return {
-            "avg_forecast_risk": 0,
-            "forecast_drift": 0,
-            "avg_supplier_risk": 0,
-            "critical_alerts": 0,
-            "avg_delay_hours": 0,
-        }
+    return list(latest.values())
 
-    data = result[0]
 
-    avg_delay = float(data.get("avg_delay_hours", 0) or 0)
-    avg_inventory = float(data.get("avg_inventory_level", 0) or 0)
-    avg_weather = float(data.get("avg_weather_risk", 0) or 0)
-    avg_congestion = float(data.get("avg_port_congestion", 0) or 0)
+async def get_analytics_overview() -> Dict[str, float]:
+    db = get_database()
 
-    # rule-based analytics score for now
-    avg_forecast_risk = min(
-        100,
-        round(
-            (avg_delay * 1.5)
-            + (avg_weather * 20)
-            + (avg_congestion * 20)
-            + max(0, (1 - (avg_inventory / 1000))) * 20,
+    snapshot_docs = await db.risk_snapshots.find(
+        {"entity_type": "route"}
+    ).sort("snapshot_time", -1).to_list(length=5000)
+
+    latest_snapshots = _latest_route_snapshots_by_key(snapshot_docs)
+
+    if latest_snapshots:
+        avg_forecast_risk = round(
+            sum(_safe_float((doc.get("scores") or {}).get("final_risk")) for doc in latest_snapshots)
+            / len(latest_snapshots),
             2,
-        ),
-    )
+        )
+        forecast_drift = round(
+            sum(_safe_float((doc.get("scores") or {}).get("news")) for doc in latest_snapshots)
+            / len(latest_snapshots),
+            2,
+        )
+        critical_alerts = sum(
+            1 for doc in latest_snapshots if _safe_float((doc.get("scores") or {}).get("final_risk")) >= 65
+        )
+    else:
+        avg_forecast_risk = 0.0
+        forecast_drift = 0.0
+        critical_alerts = 0
 
-    forecast_drift = round(avg_forecast_risk * 0.12, 2)
-
-    supplier_risk_pipeline = [
+    supplier_pipeline = [
         {
             "$group": {
                 "_id": "$supplier_id",
-                "avg_delay": {"$avg": "$delay_hours"},
-                "avg_lead_time": {"$avg": "$supplier_lead_time"},
-                "avg_inventory": {"$avg": "$inventory_level"},
-            }
-        },
-        {
-            "$project": {
-                "risk_score": {
-                    "$min": [
-                        100,
-                        {
-                            "$add": [
-                                {"$multiply": ["$avg_delay", 1.5]},
-                                {"$multiply": ["$avg_lead_time", 0.9]},
-                                {
-                                    "$multiply": [
-                                        {
-                                            "$max": [
-                                                0,
-                                                {
-                                                    "$subtract": [
-                                                        1,
-                                                        {"$divide": ["$avg_inventory", 1000]},
-                                                    ]
-                                                },
-                                            ]
-                                        },
-                                        20,
-                                    ]
-                                },
-                            ]
-                        },
-                    ]
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": None,
-                "avg_supplier_risk": {"$avg": "$risk_score"}
+                "avg_supplier_risk": {"$avg": {"$ifNull": ["$weather_risk", 0]}},
             }
         }
     ]
-
-    supplier_risk_result = await db.shipments_raw.aggregate(supplier_risk_pipeline).to_list(1)
+    supplier_rows = await db.shipments_raw.aggregate(supplier_pipeline).to_list(length=5000)
     avg_supplier_risk = round(
-        supplier_risk_result[0]["avg_supplier_risk"], 2
-    ) if supplier_risk_result else 0
+        (
+            sum(_safe_float(row.get("avg_supplier_risk")) for row in supplier_rows) / len(supplier_rows) * 100
+        )
+        if supplier_rows
+        else 0.0,
+        2,
+    )
 
-    critical_alerts = await db.alerts.count_documents({"level": "critical"})
+    delay_pipeline = [
+        {
+            "$group": {
+                "_id": None,
+                "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
+            }
+        }
+    ]
+    delay_rows = await db.shipments_raw.aggregate(delay_pipeline).to_list(length=1)
+    avg_delay_hours = round(_safe_float(delay_rows[0].get("avg_delay_hours")) if delay_rows else 0.0, 2)
 
     return {
         "avg_forecast_risk": avg_forecast_risk,
         "forecast_drift": forecast_drift,
         "avg_supplier_risk": avg_supplier_risk,
         "critical_alerts": critical_alerts,
-        "avg_delay_hours": round(avg_delay, 2),
+        "avg_delay_hours": avg_delay_hours,
     }
 
 
-async def get_forecast_series():
-    pipeline = [
+async def get_analytics_forecast() -> List[Dict[str, Any]]:
+    db = get_database()
+
+    docs = await db.shipments_raw.find(
+        {},
         {
-            "$addFields": {
-                "parsed_date": {"$dateFromString": {"dateString": "$date"}}
-            }
+            "date": 1,
+            "weather_risk": 1,
+            "news_sentiment": 1,
+            "delay_hours": 1,
+            "port_congestion": 1,
         },
-        {
-            "$group": {
-                "_id": {"$dayOfWeek": "$parsed_date"},
-                "avg_delay_hours": {"$avg": "$delay_hours"},
-                "avg_weather_risk": {"$avg": "$weather_risk"},
-                "avg_port_congestion": {"$avg": "$port_congestion"},
-                "avg_inventory_level": {"$avg": "$inventory_level"},
-            }
-        }
-    ]
+    ).sort("date", 1).to_list(length=50000)
 
-    raw = await db.shipments_raw.aggregate(pipeline).to_list(None)
+    by_day: Dict[str, Dict[str, float]] = defaultdict(lambda: {
+        "count": 0,
+        "delay": 0.0,
+        "weather": 0.0,
+        "news": 0.0,
+        "congestion": 0.0,
+    })
 
-    rows = []
-    for item in raw:
-        current = min(
-            100,
-            round(
-                (float(item.get("avg_delay_hours", 0) or 0) * 1.5)
-                + (float(item.get("avg_weather_risk", 0) or 0) * 20)
-                + (float(item.get("avg_port_congestion", 0) or 0) * 20),
-                2,
+    for doc in docs:
+        raw_date = str(doc.get("date") or "")[:10]
+        if not raw_date:
+            continue
+
+        by_day[raw_date]["count"] += 1
+        by_day[raw_date]["delay"] += _safe_float(doc.get("delay_hours"))
+        by_day[raw_date]["weather"] += _safe_float(doc.get("weather_risk")) * 100
+        by_day[raw_date]["news"] += abs(_safe_float(doc.get("news_sentiment"))) * 100
+        by_day[raw_date]["congestion"] += _safe_float(doc.get("port_congestion")) * 100
+
+    sorted_days = sorted(by_day.keys())
+    if not sorted_days:
+        return []
+
+    condensed = sorted_days[-7:]
+    points: List[Dict[str, Any]] = []
+
+    prev_current: Optional[float] = None
+    for day in condensed:
+        agg = by_day[day]
+        count = max(int(agg["count"]), 1)
+
+        current = round(
+            (
+                (agg["delay"] / count) * 1.2
+                + (agg["weather"] / count) * 0.25
+                + (agg["news"] / count) * 0.20
+                + (agg["congestion"] / count) * 0.20
             ),
+            2,
         )
+        forecast = round(current * 1.08, 2)
+        drift = round((forecast - current) if prev_current is None else (current - prev_current), 2)
 
-        forecast = min(100, round(current * 1.08, 2))
-        drift = round(forecast - current, 2)
+        points.append(
+            {
+                "day": day,
+                "current": current,
+                "forecast": forecast,
+                "drift": drift,
+            }
+        )
+        prev_current = current
 
-        day_name = DAY_NAME_MAP.get(item["_id"], "Unknown")
-
-        rows.append({
-            "day": day_name,
-            "current": current,
-            "forecast": forecast,
-            "drift": drift,
-        })
-
-    rows.sort(key=lambda x: DAY_ORDER.get(x["day"], 99))
-    return rows
+    return points
 
 
-async def get_supplier_exposure():
+async def get_supplier_exposure() -> List[Dict[str, Any]]:
+    db = get_database()
+
     pipeline = [
         {
             "$group": {
                 "_id": "$supplier_id",
                 "supplier_name": {"$first": "$supplier_name"},
-                "avg_delay_hours": {"$avg": "$delay_hours"},
-                "avg_lead_time": {"$avg": "$supplier_lead_time"},
-                "avg_inventory_level": {"$avg": "$inventory_level"},
-                "shipment_count": {"$sum": 1},
+                "avg_weather_risk": {"$avg": {"$ifNull": ["$weather_risk", 0]}},
+                "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
+                "avg_demand_volatility": {"$avg": {"$ifNull": ["$demand_volatility", 0]}},
             }
         },
-        {
-            "$addFields": {
-                "risk_score": {
-                    "$min": [
-                        100,
-                        {
-                            "$add": [
-                                {"$multiply": ["$avg_delay_hours", 1.5]},
-                                {"$multiply": ["$avg_lead_time", 0.9]},
-                                {
-                                    "$multiply": [
-                                        {
-                                            "$max": [
-                                                0,
-                                                {
-                                                    "$subtract": [
-                                                        1,
-                                                        {"$divide": ["$avg_inventory_level", 1000]},
-                                                    ]
-                                                },
-                                            ]
-                                        },
-                                        20,
-                                    ]
-                                },
-                            ]
-                        },
-                    ]
-                },
-                "dependency_score": {
-                    "$min": [
-                        100,
-                        {
-                            "$add": [
-                                {"$multiply": [{"$divide": ["$shipment_count", 300]}, 60]},
-                                {"$multiply": [{"$divide": ["$avg_lead_time", 30]}, 40]},
-                            ]
-                        },
-                    ]
-                },
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "supplier_id": "$_id",
-                "supplier_name": 1,
-                "risk_score": {"$round": ["$risk_score", 2]},
-                "dependency_score": {"$round": ["$dependency_score", 2]},
-                "combined_score": {
-                    "$round": [
-                        {"$divide": [{"$add": ["$risk_score", "$dependency_score"]}, 2]},
-                        2,
-                    ]
-                },
-            }
-        },
-        {"$sort": {"combined_score": -1}},
-        {"$limit": 10},
+        {"$sort": {"avg_weather_risk": -1, "avg_delay_hours": -1}},
+        {"$limit": 12},
     ]
 
-    return await db.shipments_raw.aggregate(pipeline).to_list(None)
+    rows = await db.shipments_raw.aggregate(pipeline).to_list(length=12)
+
+    results: List[Dict[str, Any]] = []
+    for row in rows:
+        risk_score = round(_safe_float(row.get("avg_weather_risk")) * 100, 2)
+        dependency_score = round(
+            min(
+                100.0,
+                (_safe_float(row.get("avg_delay_hours")) * 2.5)
+                + (_safe_float(row.get("avg_demand_volatility")) * 50),
+            ),
+            2,
+        )
+        combined_score = round((risk_score * 0.6) + (dependency_score * 0.4), 2)
+
+        results.append(
+            {
+                "supplier_id": str(row.get("_id")),
+                "supplier_name": row.get("supplier_name") or str(row.get("_id")),
+                "risk_score": risk_score,
+                "dependency_score": dependency_score,
+                "combined_score": combined_score,
+            }
+        )
+
+    return results
 
 
-async def get_lane_pressure():
-    pipeline = [
-        {
-            "$addFields": {
-                "lane": {
-                    "$concat": [
-                        "$tier1_origin_port",
-                        " → ",
-                        "$tier3_destination_port"
-                    ]
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": "$lane",
-                "avg_delay_hours": {"$avg": "$delay_hours"},
-                "avg_expected_time": {"$avg": "$expected_time_hours"},
-                "avg_weather_risk": {"$avg": "$weather_risk"},
-                "avg_port_congestion": {"$avg": "$port_congestion"},
-                "shipment_count": {"$sum": 1},
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "lane": "$_id",
-                "avg_delay_hours": {"$round": ["$avg_delay_hours", 2]},
-                "throughput_pct": {
-                    "$round": [
-                        {
-                            "$max": [
-                                0,
-                                {
-                                    "$min": [
-                                        100,
-                                        {
-                                            "$subtract": [
-                                                100,
-                                                {
-                                                    "$multiply": [
-                                                        {"$divide": ["$avg_delay_hours", "$avg_expected_time"]},
-                                                        100,
-                                                    ]
-                                                },
-                                            ]
-                                        },
-                                    ]
-                                },
-                            ]
-                        },
-                        2,
-                    ]
-                },
-                "pressure_score": {
-                    "$round": [
-                        {
-                            "$min": [
-                                100,
-                                {
-                                    "$add": [
-                                        {"$multiply": ["$avg_delay_hours", 1.2]},
-                                        {"$multiply": ["$avg_weather_risk", 20]},
-                                        {"$multiply": ["$avg_port_congestion", 20]},
-                                    ]
-                                },
-                            ]
-                        },
-                        2,
-                    ]
-                },
-                "shipment_count": 1,
-            }
-        },
-        {"$sort": {"pressure_score": -1}},
-        {"$limit": 10},
-    ]
+async def get_lane_pressure() -> List[Dict[str, Any]]:
+    db = get_database()
 
-    return await db.shipments_raw.aggregate(pipeline).to_list(None)
+    rows = await db.routes_master.find(
+        {"active": {"$ne": False}},
+        {
+            "route_key": 1,
+            "avg_delay_hours": 1,
+            "avg_port_congestion": 1,
+            "shipment_count": 1,
+        },
+    ).sort("avg_delay_hours", -1).to_list(length=20)
+
+    results: List[Dict[str, Any]] = []
+    for row in rows:
+        avg_delay_hours = round(_safe_float(row.get("avg_delay_hours")), 2)
+        congestion = _safe_float(row.get("avg_port_congestion"))
+        throughput_pct = round(max(0.0, 100.0 - (congestion * 60.0)), 2)
+        pressure_score = round(min(100.0, (avg_delay_hours * 1.8) + (congestion * 45.0)), 2)
+
+        results.append(
+            {
+                "lane": row.get("route_key") or "Unknown Lane",
+                "avg_delay_hours": avg_delay_hours,
+                "throughput_pct": throughput_pct,
+                "pressure_score": pressure_score,
+                "shipment_count": int(row.get("shipment_count") or 0),
+            }
+        )
+
+    return results[:10]

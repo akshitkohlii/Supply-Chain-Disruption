@@ -1,11 +1,18 @@
 from fastapi import APIRouter, Query, HTTPException
+
 from app.services.alert_service import (
+    generate_alerts_from_route_snapshots,
     get_all_alerts,
     get_alert_summary,
     update_alert_status,
 )
 
 router = APIRouter()
+
+
+@router.post("/generate")
+async def generate_alerts():
+    return await generate_alerts_from_route_snapshots()
 
 
 @router.get("/")
@@ -27,4 +34,8 @@ async def change_alert_status(alert_id: str, status: str):
     if not updated:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    return {"message": "Alert status updated", "alert_id": alert_id, "status": status}
+    return {
+        "message": "Alert status updated",
+        "alert_id": alert_id,
+        "status": status,
+    }

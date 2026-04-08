@@ -18,6 +18,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       const data = (await response.json()) as { detail?: string };
       if (data?.detail) message = data.detail;
     } catch {
+      //
     }
     throw new Error(message);
   }
@@ -26,11 +27,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type ApiDashboardOverview = {
-  total_shipments: number;
-  avg_delay_hours: number;
-  high_risk_shipments: number;
-  avg_inventory: number;
-  top_region: string;
+  globalRiskScore: number;
+  criticalAlerts: number;
+  highRiskRoutes: number;
+  delayedShipmentsPercent: number;
+  avgRouteDelayHours: number;
 };
 
 export type ApiAlertSummary = {
@@ -42,27 +43,15 @@ export type ApiAlertSummary = {
 };
 
 export type ApiMapPoint = {
-  alert_id: string;
-  title: string;
-  summary: string;
-  category: "supplier" | "port" | "climate" | "geo" | "logistics";
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  country: string;
   level: "stable" | "warning" | "critical";
-  status: "active" | "acknowledged" | "resolved";
-  timestamp: string;
-  supplier_id?: string;
-  supplier_name?: string;
-  product_id?: string;
-  destination_port?: string;
-  supplier_region?: string;
-  business_unit?: string;
-  priority_level?: string;
-  delay_hours?: number;
-  weather_risk?: number;
-  port_congestion?: number;
-  lat?: number;
-  lng?: number;
-  country?: string;
-  region?: string;
+  weatherScore: number;
+  newsScore: number;
+  summary: string;
 };
 
 export type ApiSuppliersOverview = {
@@ -150,6 +139,36 @@ export type ApiMitigationPlan = {
   scenarios: ApiMitigationScenario[];
 };
 
+export type ApiAlert = {
+  _id?: string;
+  alert_id: string;
+  entity_type: "route";
+  entity_id: string;
+  route_key: string;
+  title: string;
+  summary: string;
+  category: "climate" | "geo" | "logistics";
+  level: "stable" | "warning" | "critical";
+  status: "active" | "acknowledged" | "resolved";
+  timestamp: string;
+  location: string;
+  origin_port?: string;
+  destination_port?: string;
+  risk_score: number;
+  lat?: number;
+  lng?: number;
+  country?: string;
+  scores?: {
+    weather: number;
+    news: number;
+    logistics: number;
+    congestion: number;
+    final_risk: number;
+  };
+  top_drivers?: string[];
+  updated_at?: string;
+};
+
 export async function getDashboardOverview() {
   return apiFetch<ApiDashboardOverview>("/dashboard/overview");
 }
@@ -196,4 +215,19 @@ export async function updateAlertStatus(
       method: "PATCH",
     }
   );
+}
+
+export async function getAlerts(limit = 50) {
+  return apiFetch<ApiAlert[]>(`/alerts?limit=${limit}`);
+}
+
+export async function generateAlerts() {
+  return apiFetch<{
+    success: boolean;
+    routes_evaluated: number;
+    alerts_upserted: number;
+    skipped: number;
+  }>("/alerts/generate", {
+    method: "POST",
+  });
 }

@@ -97,6 +97,7 @@ function MainMapSection({
               alerts={mapAlerts}
               selectedAlertId={selectedAlert?.id ?? null}
               onSelectAlert={onSelectAlert}
+              panelOpen={!!selectedAlert}
             />
           </div>
 

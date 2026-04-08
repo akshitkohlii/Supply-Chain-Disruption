@@ -3,7 +3,6 @@ import type {
   ApiAlertSummary,
   ApiDashboardOverview,
   ApiMapPoint,
-  ApiSupplierOverview,
 } from "./api";
 
 export type AlertItem = {
@@ -23,6 +22,10 @@ export type AlertItem = {
   delayHours?: number;
   weatherRisk?: number;
   portCongestion?: number;
+  newsScore?: number;
+  logisticsScore?: number;
+  congestionScore?: number;
+  finalRiskScore?: number;
   isMapBacked?: boolean;
 };
 
@@ -34,11 +37,20 @@ export type KpiItem = {
   risk: "low" | "medium" | "high";
 };
 
-const FALLBACK_COORDINATES: [number, number] = [0, 0];
-
 function normalizeTimestamp(value?: string | null) {
   if (!value) return "Unknown";
   return value;
+}
+
+function hasValidCoordinates(
+  point: ApiMapPoint
+): point is ApiMapPoint & { lng: number; lat: number } {
+  return (
+    typeof point.lng === "number" &&
+    typeof point.lat === "number" &&
+    Number.isFinite(point.lng) &&
+    Number.isFinite(point.lat)
+  );
 }
 
 export function mapApiAlertToUiAlert(alert: ApiAlert): AlertItem {
@@ -46,54 +58,74 @@ export function mapApiAlertToUiAlert(alert: ApiAlert): AlertItem {
     id: alert.alert_id,
     title: alert.title,
     location:
-      alert.destination_port ??
-      alert.transit_port ??
-      alert.origin_port ??
-      "Unknown location",
-    country: "Unknown",
-    region: alert.supplier_region ?? "Unknown",
-    businessUnit: alert.business_unit ?? undefined,
+      alert.location ||
+      [alert.origin_port, alert.destination_port].filter(Boolean).join(" → ") ||
+      "Unknown route",
+    country: alert.country ?? "Unknown",
+    region: "Global",
+    businessUnit: undefined,
     category: alert.category,
     level: alert.level,
     status: alert.status,
     timestamp: normalizeTimestamp(alert.timestamp),
     summary: alert.summary,
-    coordinates: FALLBACK_COORDINATES,
-    supplierName: alert.supplier_name ?? undefined,
-    delayHours: alert.delay_hours ?? undefined,
-    weatherRisk: alert.weather_risk ?? undefined,
-    portCongestion: alert.port_congestion ?? undefined,
-    isMapBacked: false,
+    coordinates: [
+      typeof alert.lng === "number" ? alert.lng : 0,
+      typeof alert.lat === "number" ? alert.lat : 0,
+    ],
+    supplierName: undefined,
+    delayHours: undefined,
+    weatherRisk: alert.scores?.weather,
+    portCongestion: alert.scores?.congestion,
+    newsScore: alert.scores?.news,
+    logisticsScore: alert.scores?.logistics,
+    congestionScore: alert.scores?.congestion,
+    finalRiskScore: alert.scores?.final_risk,
+    isMapBacked: true,
   };
 }
 
-export function mapApiMapPointToUiAlert(point: ApiMapPoint): AlertItem {
-  const hasCoords =
-    typeof point.lng === "number" &&
-    typeof point.lat === "number" &&
-    Number.isFinite(point.lng) &&
-    Number.isFinite(point.lat);
+export function mapApiMapPointToUiAlert(point: ApiMapPoint): AlertItem | null {
+  if (!hasValidCoordinates(point)) {
+    return null;
+  }
+
+  const mappedLevel: AlertItem["level"] =
+    point.level === "critical"
+      ? "critical"
+      : point.level === "warning"
+        ? "warning"
+        : "stable";
+
+  const mappedCategory: AlertItem["category"] =
+    point.weatherScore >= point.newsScore && point.weatherScore > 0
+      ? "climate"
+      : point.newsScore > 0
+        ? "geo"
+        : "port";
 
   return {
-    id: point.alert_id,
-    title: point.title,
-    location: point.destination_port ?? "Unknown port",
+    id: point.id,
+    title: point.name,
+    location: point.name,
     country: point.country ?? "Unknown",
-    region: point.region ?? point.supplier_region ?? "Unknown",
-    businessUnit: point.business_unit ?? undefined,
-    category: point.category,
-    level: point.level,
-    status: point.status,
-    timestamp: normalizeTimestamp(point.timestamp),
+    region: "Global",
+    businessUnit: undefined,
+    category: mappedCategory,
+    level: mappedLevel,
+    status: "active",
+    timestamp: "Live",
     summary: point.summary,
-    coordinates: hasCoords
-      ? [point.lng as number, point.lat as number]
-      : FALLBACK_COORDINATES,
-    supplierName: point.supplier_name ?? undefined,
-    delayHours: point.delay_hours ?? undefined,
-    weatherRisk: point.weather_risk ?? undefined,
-    portCongestion: point.port_congestion ?? undefined,
-    isMapBacked: hasCoords,
+    coordinates: [point.lng, point.lat],
+    supplierName: undefined,
+    delayHours: undefined,
+    weatherRisk: point.weatherScore,
+    portCongestion: 0,
+    newsScore: point.newsScore,
+    logisticsScore: undefined,
+    congestionScore: undefined,
+    finalRiskScore: undefined,
+    isMapBacked: true,
   };
 }
 
@@ -108,74 +140,61 @@ function formatInt(value: number) {
 export function buildDashboardKpisFromApi(params: {
   dashboardOverview: ApiDashboardOverview | null;
   alertSummary: ApiAlertSummary | null;
-  suppliersOverview: ApiSupplierOverview | null;
 }): KpiItem[] {
-  const { dashboardOverview, alertSummary, suppliersOverview } = params;
+  const { dashboardOverview, alertSummary } = params;
 
-  const totalShipments = dashboardOverview?.total_shipments ?? 0;
-  const highRiskShipments = dashboardOverview?.high_risk_shipments ?? 0;
-  const delayedPct =
-    totalShipments > 0 ? (highRiskShipments / totalShipments) * 100 : 0;
-
-  const globalRiskScore = Math.min(
-    100,
-    Math.round(
-      (suppliersOverview?.avg_risk_score ?? 0) * 0.5 +
-        (alertSummary?.critical_alerts ?? 0) * 2 +
-        delayedPct * 0.8
-    )
-  );
+  const globalRiskScore = dashboardOverview?.globalRiskScore ?? 0;
+  const criticalAlerts = dashboardOverview?.criticalAlerts ?? 0;
+  const highRiskRoutes = dashboardOverview?.highRiskRoutes ?? 0;
+  const delayedShipmentsPercent = dashboardOverview?.delayedShipmentsPercent ?? 0;
+  const avgRouteDelayHours = dashboardOverview?.avgRouteDelayHours ?? 0;
 
   return [
     {
       title: "Global Risk Score",
-      value: formatInt(globalRiskScore),
+      value: formatInt(Math.round(globalRiskScore)),
       change: `${alertSummary?.top_category ?? "stable"} focus`,
       trend: globalRiskScore >= 70 ? "up" : globalRiskScore >= 40 ? "neutral" : "down",
       risk: globalRiskScore >= 70 ? "high" : globalRiskScore >= 40 ? "medium" : "low",
     },
     {
       title: "Critical Alerts",
-      value: formatInt(alertSummary?.critical_alerts ?? 0),
+      value: formatInt(criticalAlerts),
       change: `${formatInt(alertSummary?.active_alerts ?? 0)} active`,
-      trend: (alertSummary?.critical_alerts ?? 0) > 0 ? "up" : "neutral",
-      risk:
-        (alertSummary?.critical_alerts ?? 0) >= 10
-          ? "high"
-          : (alertSummary?.critical_alerts ?? 0) >= 4
-            ? "medium"
-            : "low",
+      trend: criticalAlerts > 0 ? "up" : "neutral",
+      risk: criticalAlerts >= 10 ? "high" : criticalAlerts >= 4 ? "medium" : "low",
     },
     {
-      title: "High-Risk Suppliers",
-      value: formatInt(suppliersOverview?.high_risk_suppliers ?? 0),
-      change: `${formatInt(suppliersOverview?.total_suppliers ?? 0)} tracked`,
-      trend: (suppliersOverview?.high_risk_suppliers ?? 0) > 0 ? "up" : "neutral",
-      risk:
-        (suppliersOverview?.high_risk_suppliers ?? 0) >= 20
-          ? "high"
-          : (suppliersOverview?.high_risk_suppliers ?? 0) >= 8
-            ? "medium"
-            : "low",
+      title: "High-Risk Routes",
+      value: formatInt(highRiskRoutes),
+      change: "latest route snapshots",
+      trend: highRiskRoutes > 0 ? "up" : "neutral",
+      risk: highRiskRoutes >= 20 ? "high" : highRiskRoutes >= 8 ? "medium" : "low",
     },
     {
       title: "Delayed Shipments %",
-      value: formatPercent(delayedPct),
-      change: `${formatInt(highRiskShipments)} flagged`,
-      trend: delayedPct >= 20 ? "up" : delayedPct >= 10 ? "neutral" : "down",
-      risk: delayedPct >= 20 ? "high" : delayedPct >= 10 ? "medium" : "low",
+      value: formatPercent(delayedShipmentsPercent),
+      change: "from shipment baseline",
+      trend:
+        delayedShipmentsPercent >= 20
+          ? "up"
+          : delayedShipmentsPercent >= 10
+            ? "neutral"
+            : "down",
+      risk:
+        delayedShipmentsPercent >= 20
+          ? "high"
+          : delayedShipmentsPercent >= 10
+            ? "medium"
+            : "low",
     },
     {
       title: "Avg Time to Recover",
-      value: `${Math.max(12, Math.round((dashboardOverview?.avg_delay_hours ?? 0) * 1.8))}h`,
-      change: "proxy from delay",
+      value: `${Math.max(12, Math.round(avgRouteDelayHours * 1.8))}h`,
+      change: `${avgRouteDelayHours.toFixed(1)}h avg delay`,
       trend: "neutral",
       risk:
-        (dashboardOverview?.avg_delay_hours ?? 0) >= 20
-          ? "high"
-          : (dashboardOverview?.avg_delay_hours ?? 0) >= 8
-            ? "medium"
-            : "low",
+        avgRouteDelayHours >= 20 ? "high" : avgRouteDelayHours >= 8 ? "medium" : "low",
     },
   ];
 }

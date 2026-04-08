@@ -1,0 +1,7 @@
+RISK_LEVEL_STABLE = "stable"
+RISK_LEVEL_WARNING = "warning"
+RISK_LEVEL_CRITICAL = "critical"
+
+ALERT_STATUS_ACTIVE = "active"
+ALERT_STATUS_ACKNOWLEDGED = "acknowledged"
+ALERT_STATUS_RESOLVED = "resolved"

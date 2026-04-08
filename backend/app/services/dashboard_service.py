@@ -1,49 +1,64 @@
-from app.core.database import db
+from app.core.database import get_database
 
 
 async def get_dashboard_overview():
-    total_shipments = await db.shipments_raw.count_documents({})
+    db = get_database()
 
-    pipeline = [
+    latest_snapshots = await db.risk_snapshots.find(
+        {"entity_type": "route"}
+    ).sort("snapshot_time", -1).to_list(length=5000)
+
+    latest_by_route = {}
+    for snapshot in latest_snapshots:
+        route_key = snapshot.get("route_key") or snapshot.get("entity_id")
+        if route_key and route_key not in latest_by_route:
+            latest_by_route[route_key] = snapshot
+
+    latest_route_snapshots = list(latest_by_route.values())
+
+    if latest_route_snapshots:
+        global_risk_score = round(
+            sum((snap.get("scores", {}) or {}).get("final_risk", 0) for snap in latest_route_snapshots)
+            / len(latest_route_snapshots),
+            2,
+        )
+        high_risk_routes = sum(
+            1
+            for snap in latest_route_snapshots
+            if int((snap.get("scores", {}) or {}).get("final_risk", 0)) >= 65
+        )
+    else:
+        global_risk_score = 0
+        high_risk_routes = 0
+
+    total_shipments = await db.shipments_raw.count_documents({})
+    delayed_shipments = await db.shipments_raw.count_documents({"delay_hours": {"$gt": 0}})
+    delayed_shipments_percent = round(
+        (delayed_shipments / total_shipments) * 100, 2
+    ) if total_shipments else 0
+
+    route_delay_pipeline = [
         {
             "$group": {
                 "_id": None,
-                "avg_delay": {"$avg": "$delay_hours"},
-                "avg_inventory": {"$avg": "$inventory_level"}
+                "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
             }
         }
     ]
+    route_delay_result = await db.shipments_raw.aggregate(route_delay_pipeline).to_list(1)
+    avg_route_delay_hours = round(
+        float(route_delay_result[0]["avg_delay_hours"]) if route_delay_result else 0,
+        2,
+    )
 
-    agg_result = await db.shipments_raw.aggregate(pipeline).to_list(1)
-
-    avg_delay = agg_result[0]["avg_delay"] if agg_result else 0
-    avg_inventory = agg_result[0]["avg_inventory"] if agg_result else 0
-
-    # High risk
-    high_risk_count = await db.alerts.count_documents({
-        "level": "critical",
-        "status": "active"
-    })
-
-    # Top region
-    region_pipeline = [
-        {
-            "$group": {
-                "_id": "$supplier_region",
-                "count": {"$sum": 1}
-            }
-        },
-        {"$sort": {"count": -1}},
-        {"$limit": 1}
-    ]
-
-    region_result = await db.shipments_raw.aggregate(region_pipeline).to_list(1)
-    top_region = region_result[0]["_id"] if region_result else "N/A"
+    critical_alerts = await db.alerts.count_documents(
+        {"level": "critical", "status": "active"}
+    )
 
     return {
-        "total_shipments": total_shipments,
-        "avg_delay_hours": round(avg_delay, 2),
-        "high_risk_shipments": high_risk_count,
-        "avg_inventory": round(avg_inventory, 2),
-        "top_region": top_region
+        "globalRiskScore": global_risk_score,
+        "criticalAlerts": critical_alerts,
+        "highRiskRoutes": high_risk_routes,
+        "delayedShipmentsPercent": delayed_shipments_percent,
+        "avgRouteDelayHours": avg_route_delay_hours,
     }

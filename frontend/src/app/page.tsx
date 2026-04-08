@@ -13,13 +13,12 @@ import RightRail from "@/components/dashboard/RightRail";
 
 import {
   getAlertSummary,
+  getAlerts,
   getAnalyticsForecast,
   getAnalyticsOverview,
   getDashboardOverview,
   getLanePressure,
-  getMapPoints,
   getSupplierExposure,
-  getSuppliersOverview,
   updateAlertStatus,
   type ApiAnalyticsOverview,
   type ApiForecastPoint,
@@ -29,7 +28,7 @@ import {
 
 import {
   buildDashboardKpisFromApi,
-  mapApiMapPointToUiAlert,
+  mapApiAlertToUiAlert,
   type AlertItem,
 } from "@/lib/mappers";
 
@@ -50,19 +49,15 @@ function scoreAlert(alert: AlertItem) {
   const congestion = alert.portCongestion ?? 0;
   const delay = alert.delayHours ?? 0;
 
-  return (
-    levelRank(alert.level) * 1000 +
-    delay * 10 +
-    weather * 100 +
-    congestion * 100
-  );
+  return levelRank(alert.level) * 1000 + delay * 10 + weather * 100 + congestion * 100;
 }
 
 function dedupeHighestRiskPerLocation(alerts: AlertItem[]) {
   const byLocation = new Map<string, AlertItem>();
 
   for (const alert of alerts) {
-    if (!alert.isMapBacked) continue;
+    const [lng, lat] = alert.coordinates;
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) continue;
 
     const key = `${alert.location}|${alert.country}`;
     const existing = byLocation.get(key);
@@ -179,27 +174,40 @@ export default function DashboardPage() {
         setMidIsLoading(true);
         setError(null);
 
-        const [
-          dashboardOverview,
-          alertSummary,
-          mapPointsRes,
-          suppliersOverview,
-          analyticsOverviewRes,
-          forecastRes,
-          supplierExposureRes,
-          lanePressureRes,
-        ] = await Promise.all([
-          getDashboardOverview(),
-          getAlertSummary(),
-          getMapPoints(50),
-          getSuppliersOverview(),
-          getAnalyticsOverview(),
-          getAnalyticsForecast(),
-          getSupplierExposure(),
-          getLanePressure(),
-        ]);
+        const dashboardOverview = await getDashboardOverview();
+        const alertSummary = await getAlertSummary();
+        const alertsRes = await getAlerts(50);
 
-        const uiAlerts = mapPointsRes.map(mapApiMapPointToUiAlert);
+        let analyticsOverviewRes: ApiAnalyticsOverview | null = null;
+        let forecastRes: ApiForecastPoint[] = [];
+        let supplierExposureRes: ApiSupplierExposureItem[] = [];
+        let lanePressureRes: ApiLanePressureItem[] = [];
+
+        try {
+          analyticsOverviewRes = await getAnalyticsOverview();
+        } catch (e) {
+          console.error("analytics overview failed", e);
+        }
+
+        try {
+          forecastRes = await getAnalyticsForecast();
+        } catch (e) {
+          console.error("forecast failed", e);
+        }
+
+        try {
+          supplierExposureRes = await getSupplierExposure();
+        } catch (e) {
+          console.error("supplier exposure failed", e);
+        }
+
+        try {
+          lanePressureRes = await getLanePressure();
+        } catch (e) {
+          console.error("lane pressure failed", e);
+        }
+
+        const uiAlerts = alertsRes.map(mapApiAlertToUiAlert);
 
         setAlerts(uiAlerts);
 
@@ -207,7 +215,6 @@ export default function DashboardPage() {
           buildDashboardKpisFromApi({
             dashboardOverview,
             alertSummary,
-            suppliersOverview,
           })
         );
 
@@ -233,10 +240,8 @@ export default function DashboardPage() {
   const filteredAlerts = useMemo(() => {
     return alerts.filter((alert) => {
       const matchesSearch = matchesSearchFilter(alert, normalizedSearch);
-      const matchesLayer =
-        activeLayer === "all" ? true : alert.category === activeLayer;
-      const matchesLegendLevel =
-        activeLevel === "all" ? true : alert.level === activeLevel;
+      const matchesLayer = activeLayer === "all" ? true : alert.category === activeLayer;
+      const matchesLegendLevel = activeLevel === "all" ? true : alert.level === activeLevel;
       const matchesRiskLevel = matchesRiskLevelFilter(alert, riskLevel);
       const matchesRegion = matchesRegionFilter(alert, region);
       const matchesBusinessUnit = matchesBusinessUnitFilter(alert, businessUnit);
@@ -270,25 +275,32 @@ export default function DashboardPage() {
     return filteredAlerts.filter((alert) => alert.status !== "resolved");
   }, [filteredAlerts]);
 
-  // 1. Move selectedAlert UP so mapVisibleAlerts can use it
   const selectedAlert = useMemo(() => {
     return alerts.find((alert) => alert.id === selectedAlertId) ?? null;
   }, [alerts, selectedAlertId]);
 
   const mapVisibleAlerts = useMemo(() => {
-    const deduped = dedupeHighestRiskPerLocation(visibleAlerts);
+    const mapCapable = visibleAlerts.filter((alert) => {
+      const [lng, lat] = alert.coordinates;
+      return Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0);
+    });
 
-    // 2. If an alert is selected, forcefully inject it into the map data 
-    // to override the "Critical" pin at that specific location.
-    if (selectedAlert && selectedAlert.isMapBacked) {
+    const deduped = dedupeHighestRiskPerLocation(mapCapable);
+
+    if (selectedAlert) {
       const key = `${selectedAlert.location}|${selectedAlert.country}`;
-      const filtered = deduped.filter(a => `${a.location}|${a.country}` !== key);
-      return [...filtered, selectedAlert];
+      const filtered = deduped.filter((a) => `${a.location}|${a.country}` !== key);
+
+      const [lng, lat] = selectedAlert.coordinates;
+      if (Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0)) {
+        return [...filtered, selectedAlert];
+      }
+
+      return filtered;
     }
 
     return deduped;
   }, [visibleAlerts, selectedAlert]);
-
 
   const notificationAlerts = useMemo(() => {
     return alerts.filter((alert) => alert.status === "active");
@@ -302,9 +314,7 @@ export default function DashboardPage() {
       await updateAlertStatus(id, newStatus);
 
       setAlerts((prev) =>
-        prev.map((alert) =>
-          alert.id === id ? { ...alert, status: newStatus } : alert
-        )
+        prev.map((alert) => (alert.id === id ? { ...alert, status: newStatus } : alert))
       );
     } catch (err) {
       console.error("Failed to update alert status:", err);
@@ -451,6 +461,7 @@ export default function DashboardPage() {
             analyticsOverview={analyticsOverview}
             isLoading={midIsLoading}
           />
+
           <BottomSection selectedAlertId={selectedAlertId} />
         </section>
       </div>

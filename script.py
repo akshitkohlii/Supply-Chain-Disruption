@@ -1,18 +1,18 @@
 import os
 
 # ===== CONFIG =====
-FRONTEND_DIR = "/Users/mohitkumar/Desktop/supplychain/frontend"  # change this
-BACKEND_DIR = "/Users/mohitkumar/Desktop/supplychain/backend"    # change this
+FRONTEND_DIR = "/Users/mohitkumar/Desktop/supplychain/frontend"
+BACKEND_DIR = "/Users/mohitkumar/Desktop/supplychain/backend" 
 
 FRONTEND_OUTPUT_FILE = "frontend_dump.txt"
 BACKEND_OUTPUT_FILE = "backend_dump.txt"
 
-# File extensions to skip (binary / unnecessary)
+# File extensions to skip
 SKIP_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".svg",
     ".ico", ".pdf", ".zip", ".tar", ".gz",
     ".mp4", ".mp3", ".exe", ".dll",
-    ".pyc", ".pyo"
+    ".pyc", ".pyo", ".csv"
 }
 
 # Folders to completely ignore

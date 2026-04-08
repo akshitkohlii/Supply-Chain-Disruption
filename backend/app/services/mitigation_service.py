@@ -1,267 +1,328 @@
-from app.core.database import db
+from typing import Any, Dict, List, Optional
+
+from app.core.database import get_database
 
 
-def clamp(value: float, minimum: float = 0, maximum: float = 100) -> float:
-    return max(minimum, min(maximum, value))
+def clamp(value: float, low: float = 0, high: float = 100) -> float:
+    return max(low, min(high, value))
 
 
-def to_priority(level: str, priority_level: str | None) -> str:
-    if level == "critical":
+def priority_multiplier(priority_level: Optional[str]) -> float:
+    if not priority_level:
+        return 1.0
+
+    value = priority_level.strip().lower()
+    if value == "high":
+        return 1.5
+    if value == "medium":
+        return 1.0
+    if value == "low":
+        return 0.7
+    return 1.0
+
+
+def temperature_multiplier(temperature_control_required: Any) -> float:
+    if isinstance(temperature_control_required, bool):
+        return 1.3 if temperature_control_required else 1.0
+
+    if isinstance(temperature_control_required, str):
+        return 1.3 if temperature_control_required.strip().lower() in {"true", "yes", "1"} else 1.0
+
+    return 1.0
+
+
+def estimate_delay_damage(
+    order_value: float,
+    delay_hours: float,
+    priority_level: Optional[str],
+    temperature_control_required: Any,
+) -> float:
+    delay_days = max(delay_hours, 0.0) / 24.0
+    base_damage = order_value * 0.01 * delay_days
+    return base_damage * priority_multiplier(priority_level) * temperature_multiplier(
+        temperature_control_required
+    )
+
+
+def build_scenarios(
+    final_risk: float,
+    delay_hours: float,
+    order_value: float,
+    priority_level: Optional[str],
+    temperature_control_required: Any,
+) -> List[Dict[str, Any]]:
+    baseline_damage = estimate_delay_damage(
+        order_value=order_value,
+        delay_hours=delay_hours,
+        priority_level=priority_level,
+        temperature_control_required=temperature_control_required,
+    )
+
+    reroute_delay = max(4.0, delay_hours - 18.0)
+    reroute_exec_cost = order_value * 0.12
+    reroute_residual = estimate_delay_damage(
+        order_value=order_value,
+        delay_hours=reroute_delay,
+        priority_level=priority_level,
+        temperature_control_required=temperature_control_required,
+    )
+    reroute_total = reroute_exec_cost + reroute_residual
+
+    buffer_delay = max(6.0, delay_hours - 8.0)
+    buffer_exec_cost = order_value * 0.04
+    buffer_residual = estimate_delay_damage(
+        order_value=order_value,
+        delay_hours=buffer_delay,
+        priority_level=priority_level,
+        temperature_control_required=temperature_control_required,
+    )
+    buffer_total = buffer_exec_cost + buffer_residual
+
+    priority_delay = max(3.0, delay_hours - 12.0)
+    priority_exec_cost = order_value * 0.07
+    priority_residual = estimate_delay_damage(
+        order_value=order_value,
+        delay_hours=priority_delay,
+        priority_level=priority_level,
+        temperature_control_required=temperature_control_required,
+    )
+    priority_total = priority_exec_cost + priority_residual
+
+    return [
+        {
+            "id": "reroute",
+            "label": "Reroute via alternate lane",
+            "risk_score": round(clamp(final_risk - 18), 2),
+            "delay_hours": round(reroute_delay, 2),
+            "recovery_days": round(max(1.0, reroute_delay / 24.0), 2),
+            "cost_impact": round(reroute_total, 2),
+        },
+        {
+            "id": "buffer-stock",
+            "label": "Increase safety stock",
+            "risk_score": round(clamp(final_risk - 10), 2),
+            "delay_hours": round(buffer_delay, 2),
+            "recovery_days": round(max(1.0, buffer_delay / 24.0), 2),
+            "cost_impact": round(buffer_total, 2),
+        },
+        {
+            "id": "carrier-priority",
+            "label": "Priority carrier handling",
+            "risk_score": round(clamp(final_risk - 7), 2),
+            "delay_hours": round(priority_delay, 2),
+            "recovery_days": round(max(1.0, priority_delay / 24.0), 2),
+            "cost_impact": round(priority_total, 2),
+        },
+    ]
+
+
+def derive_priority(final_risk: float) -> str:
+    if final_risk >= 70:
         return "high"
-    if level == "warning":
-        return "medium"
-
-    if priority_level and priority_level.lower() == "high":
+    if final_risk >= 40:
         return "medium"
     return "low"
 
 
-def build_reason(alert: dict) -> str:
-    category = alert.get("category", "geo")
-    destination_port = alert.get("destination_port", "the destination port")
-    supplier_name = alert.get("supplier_name", "the supplier")
+def derive_reason(alert: Dict[str, Any]) -> str:
+    scores = alert.get("scores", {}) or {}
+    weather = float(scores.get("weather", 0) or 0)
+    news = float(scores.get("news", 0) or 0)
+    logistics = float(scores.get("logistics", 0) or 0)
+    congestion = float(scores.get("congestion", 0) or 0)
 
-    delay_hours = float(alert.get("delay_hours", 0) or 0)
-    weather_risk = float(alert.get("weather_risk", 0) or 0)
-    port_congestion = float(alert.get("port_congestion", 0) or 0)
-    inventory_level = float(alert.get("inventory_level", 0) or 0)
-    safety_stock_level = float(alert.get("safety_stock_level", 0) or 0)
+    dominant = max(
+        [
+            ("weather", weather),
+            ("news", news),
+            ("logistics", logistics),
+            ("congestion", congestion),
+        ],
+        key=lambda item: item[1],
+    )[0]
 
-    if category == "climate":
-        return (
-            f"Weather volatility near {destination_port} is elevated "
-            f"(weather risk {round(weather_risk, 2)}), increasing disruption probability."
-        )
-
-    if category == "port":
-        return (
-            f"Port congestion at {destination_port} is elevated "
-            f"(score {round(port_congestion, 2)}), increasing transit delays and queue time."
-        )
-
-    if category == "supplier":
-        return (
-            f"{supplier_name} is under inventory pressure with stock at "
-            f"{round(inventory_level, 2)} below safety stock {round(safety_stock_level, 2)}."
-        )
-
-    if category == "logistics":
-        return (
-            f"Transit delay has reached {round(delay_hours, 2)} hours, "
-            f"putting service levels and recovery timelines at risk."
-        )
-
-    return (
-        f"Multiple weak signals across delay, weather, and congestion indicate "
-        f"higher route risk for {destination_port}."
-    )
+    if dominant == "weather":
+        return "Weather conditions are the dominant disruption driver on this route."
+    if dominant == "logistics":
+        return "Delay and operational friction are the dominant disruption drivers."
+    if dominant == "congestion":
+        return "Port congestion is the dominant disruption driver on this route."
+    return "External news and disruption signals are the dominant route risk driver."
 
 
-def build_actions(alert: dict) -> list[str]:
-    category = alert.get("category", "geo")
-    business_unit = alert.get("business_unit", "Operations")
+async def get_route_context(route_key: str) -> Dict[str, Any]:
+    db = get_database()
 
-    if category == "climate":
-        return [
-            "Shift critical shipments to lower-weather-risk lane",
-            "Increase regional buffer inventory for exposed SKUs",
-            f"Escalate monitoring to {business_unit} control tower",
-        ]
+    route = await db.routes_master.find_one({"route_key": route_key})
+    if not route:
+        return {
+            "avg_order_value": 50000.0,
+            "avg_delay_hours": 24.0,
+            "priority_level": "Medium",
+            "temperature_control_required": False,
+        }
 
-    if category == "port":
-        return [
-            "Reroute affected loads to alternate destination port",
-            "Prioritize high-value and high-urgency shipments",
-            "Temporarily rebalance throughput across available lanes",
-        ]
+    origin = route.get("origin_port")
+    destination = route.get("destination_port")
 
-    if category == "supplier":
-        return [
-            "Increase safety stock coverage for impacted SKUs",
-            "Trigger alternate supplier readiness review",
-            "Protect top-demand orders with allocation controls",
-        ]
-
-    if category == "logistics":
-        return [
-            "Expedite delayed loads through alternate transit path",
-            "Split shipment batches based on urgency",
-            "Re-sequence deliveries for high-priority customers",
-        ]
-
-    return [
-        "Activate enhanced route monitoring",
-        "Review alternate lane and supplier options",
-        "Increase short-term operational buffer",
-    ]
-
-
-def build_title(alert: dict) -> str:
-    category = alert.get("category", "geo")
-    destination_port = alert.get("destination_port", "destination lane")
-    supplier_name = alert.get("supplier_name", "supplier")
-
-    if category == "climate":
-        return f"Weather mitigation plan for {destination_port}"
-    if category == "port":
-        return f"Port congestion mitigation for {destination_port}"
-    if category == "supplier":
-        return f"Inventory stabilization plan for {supplier_name}"
-    if category == "logistics":
-        return f"Delay recovery plan for {destination_port}"
-    return f"Risk containment plan for {destination_port}"
-
-
-def build_reroute_plan(alert: dict, eta_savings_hours: float) -> dict:
-    origin_port = alert.get("origin_port") or "Current Origin"
-    destination_port = alert.get("destination_port") or "Current Destination"
-
-    alternate_map = {
-        "Shanghai Port": "Busan Port",
-        "Busan Port": "Shanghai Port",
-        "Hamburg Port": "Mumbai Port",
-        "Mumbai Port": "Hamburg Port",
-        "Los Angeles Port": "Busan Port",
-    }
-
-    alternate = alternate_map.get(destination_port, "Busan Port")
-
-    return {
-        "from": origin_port,
-        "to": alternate,
-        "eta_savings_hours": round(max(4, eta_savings_hours), 2),
-    }
-
-
-def build_stock_plan(alert: dict) -> dict:
-    supplier_name = alert.get("supplier_name", "Unknown Supplier")
-    business_unit = alert.get("business_unit", "General")
-    inventory_level = float(alert.get("inventory_level", 0) or 0)
-    safety_stock_level = float(alert.get("safety_stock_level", 0) or 0)
-
-    current_days_cover = max(1, round(inventory_level / 80))
-    recommended_days_cover = max(current_days_cover + 2, round(safety_stock_level / 60))
-    increase_percent = round(
-        max(
-            10,
-            ((recommended_days_cover - current_days_cover) / max(current_days_cover, 1)) * 100,
-        ),
-        2,
-    )
-
-    return {
-        "supplier": supplier_name,
-        "sku_group": business_unit,
-        "current_days_cover": current_days_cover,
-        "recommended_days_cover": recommended_days_cover,
-        "increase_percent": increase_percent,
-    }
-
-
-def build_scenarios(alert: dict, base_risk: float) -> list[dict]:
-    delay_hours = float(alert.get("delay_hours", 0) or 0)
-
-    no_action_delay = round(delay_hours, 2)
-    no_action_recovery = round(max(1.5, delay_hours / 8), 2)
-
-    reroute_risk = clamp(base_risk - 15)
-    reroute_delay = round(max(4, delay_hours * 0.62), 2)
-    reroute_recovery = round(max(1.2, no_action_recovery * 0.72), 2)
-
-    stock_risk = clamp(base_risk - 11)
-    stock_delay = round(max(5, delay_hours * 0.78), 2)
-    stock_recovery = round(max(1.0, no_action_recovery * 0.64), 2)
-
-    hybrid_risk = clamp(base_risk - 25)
-    hybrid_delay = round(max(3, delay_hours * 0.4), 2)
-    hybrid_recovery = round(max(1.0, no_action_recovery * 0.48), 2)
-
-    return [
+    pipeline = [
         {
-            "id": "base",
-            "label": "No Action",
-            "risk_score": round(base_risk, 2),
-            "delay_hours": no_action_delay,
-            "recovery_days": no_action_recovery,
-            "cost_impact": 0,
+            "$match": {
+                "tier1_origin_port": origin,
+                "tier3_destination_port": destination,
+            }
         },
         {
-            "id": "reroute",
-            "label": "Reroute",
-            "risk_score": round(reroute_risk, 2),
-            "delay_hours": reroute_delay,
-            "recovery_days": reroute_recovery,
-            "cost_impact": 6,
-        },
-        {
-            "id": "buffer",
-            "label": "Increase Safety Stock",
-            "risk_score": round(stock_risk, 2),
-            "delay_hours": stock_delay,
-            "recovery_days": stock_recovery,
-            "cost_impact": 8,
-        },
-        {
-            "id": "hybrid",
-            "label": "Reroute + Buffer Stock",
-            "risk_score": round(hybrid_risk, 2),
-            "delay_hours": hybrid_delay,
-            "recovery_days": hybrid_recovery,
-            "cost_impact": 12,
+            "$group": {
+                "_id": None,
+                "avg_order_value": {"$avg": {"$ifNull": ["$order_value", 50000]}},
+                "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 24]}},
+                "high_priority_count": {
+                    "$sum": {
+                        "$cond": [
+                            {"$eq": ["$priority_level", "High"]},
+                            1,
+                            0,
+                        ]
+                    }
+                },
+                "medium_priority_count": {
+                    "$sum": {
+                        "$cond": [
+                            {"$eq": ["$priority_level", "Medium"]},
+                            1,
+                            0,
+                        ]
+                    }
+                },
+                "low_priority_count": {
+                    "$sum": {
+                        "$cond": [
+                            {"$eq": ["$priority_level", "Low"]},
+                            1,
+                            0,
+                        ]
+                    }
+                },
+                "temp_control_count": {
+                    "$sum": {
+                        "$cond": [
+                            {"$eq": ["$temperature_control_required", True]},
+                            1,
+                            0,
+                        ]
+                    }
+                },
+                "shipment_count": {"$sum": 1},
+            }
         },
     ]
 
+    rows = await db.shipments_raw.aggregate(pipeline).to_list(length=1)
+    if not rows:
+        return {
+            "avg_order_value": 50000.0,
+            "avg_delay_hours": 24.0,
+            "priority_level": "Medium",
+            "temperature_control_required": False,
+        }
 
-def build_mitigation_payload(alert: dict) -> dict:
-    delay_hours = float(alert.get("delay_hours", 0) or 0)
-    weather_risk = float(alert.get("weather_risk", 0) or 0)
-    port_congestion = float(alert.get("port_congestion", 0) or 0)
-    inventory_level = float(alert.get("inventory_level", 0) or 0)
-    safety_stock_level = float(alert.get("safety_stock_level", 0) or 0)
+    row = rows[0]
+    shipment_count = max(int(row.get("shipment_count") or 0), 1)
 
-    inventory_pressure = max(0, safety_stock_level - inventory_level)
+    high_count = int(row.get("high_priority_count") or 0)
+    medium_count = int(row.get("medium_priority_count") or 0)
+    low_count = int(row.get("low_priority_count") or 0)
 
-    base_risk = clamp(
-        (delay_hours * 1.3)
-        + (weather_risk * 22)
-        + (port_congestion * 22)
-        + (inventory_pressure * 0.08)
-    )
+    if high_count >= medium_count and high_count >= low_count:
+        dominant_priority = "High"
+    elif medium_count >= low_count:
+        dominant_priority = "Medium"
+    else:
+        dominant_priority = "Low"
 
-    confidence = clamp(
-        62
-        + (12 if alert.get("level") == "critical" else 6 if alert.get("level") == "warning" else 0)
-        + (6 if weather_risk >= 0.7 else 0)
-        + (6 if port_congestion >= 0.7 else 0)
-        + (6 if inventory_level < safety_stock_level else 0),
-        55,
-        95,
-    )
-
-    impact_reduction = clamp(18 if alert.get("level") == "critical" else 12 if alert.get("level") == "warning" else 8)
-    scenarios = build_scenarios(alert, base_risk)
-    hybrid = next((item for item in scenarios if item["id"] == "hybrid"), scenarios[-1])
-    eta_savings_hours = max(4, delay_hours - hybrid["delay_hours"])
+    temperature_required = (int(row.get("temp_control_count") or 0) / shipment_count) >= 0.4
 
     return {
-        "id": f"MIT_{alert['alert_id']}",
-        "alert_id": alert["alert_id"],
-        "title": build_title(alert),
-        "priority": to_priority(alert.get("level", "warning"), alert.get("priority_level")),
-        "confidence": round(confidence, 2),
-        "impact_reduction": round(impact_reduction, 2),
-        "reason": build_reason(alert),
-        "actions": build_actions(alert),
-        "reroute_plan": build_reroute_plan(alert, eta_savings_hours),
-        "stock_plan": build_stock_plan(alert),
+        "avg_order_value": float(row.get("avg_order_value") or 50000.0),
+        "avg_delay_hours": float(row.get("avg_delay_hours") or 24.0),
+        "priority_level": dominant_priority,
+        "temperature_control_required": temperature_required,
+    }
+
+
+async def get_mitigation_plan(alert_id: str) -> Dict[str, Any]:
+    db = get_database()
+
+    alert = await db.alerts.find_one({"alert_id": alert_id})
+    if not alert:
+        raise ValueError("Alert not found")
+
+    scores = alert.get("scores", {}) or {}
+    final_risk = float(scores.get("final_risk", alert.get("risk_score", 0)) or 0)
+    weather = float(scores.get("weather", 0) or 0)
+    news = float(scores.get("news", 0) or 0)
+    logistics = float(scores.get("logistics", 0) or 0)
+
+    origin = alert.get("origin_port") or "Unknown origin"
+    transit = alert.get("transit_port") or "Unknown transit"
+    destination = alert.get("destination_port") or "Unknown destination"
+
+    route_context = await get_route_context(alert.get("route_key") or alert.get("entity_id"))
+
+    avg_order_value = float(route_context.get("avg_order_value", 50000.0) or 50000.0)
+    avg_delay_hours = float(route_context.get("avg_delay_hours", 24.0) or 24.0)
+    priority_level = route_context.get("priority_level", "Medium")
+    temperature_control_required = route_context.get("temperature_control_required", False)
+
+    scenarios = build_scenarios(
+        final_risk=final_risk,
+        delay_hours=avg_delay_hours,
+        order_value=avg_order_value,
+        priority_level=priority_level,
+        temperature_control_required=temperature_control_required,
+    )
+
+    best_scenario = min(scenarios, key=lambda s: s["risk_score"])
+    impact_reduction = round(max(0.0, final_risk - best_scenario["risk_score"]), 2)
+
+    actions: List[str] = []
+
+    if news >= 60:
+        actions.append(f"Monitor disruption updates around {transit}.")
+        actions.append(f"Prepare alternate route from {origin} to {destination}.")
+    if weather >= 60:
+        actions.append(
+            f"Track weather risk affecting {transit if transit != 'Unknown transit' else destination}."
+        )
+    if logistics >= 40:
+        actions.append("Prioritize shipment handling and expedite backlog clearance.")
+    if not actions:
+        actions = [
+            "Maintain enhanced monitoring for this route.",
+            "Prepare contingency routing if risk escalates.",
+        ]
+
+    return {
+        "id": f"mitigation::{alert_id}",
+        "alert_id": alert_id,
+        "title": f"Mitigation plan for {origin} → {transit} → {destination}",
+        "priority": derive_priority(final_risk),
+        "confidence": round(min(0.95, 0.55 + (final_risk / 200)), 2),
+        "impact_reduction": impact_reduction,
+        "reason": derive_reason(alert),
+        "actions": actions,
+        "reroute_plan": {
+            "from": transit,
+            "to": destination,
+            "eta_savings_hours": round(max(2.0, avg_delay_hours * 0.25), 2),
+        },
+        "stock_plan": {
+            "supplier": origin,
+            "sku_group": "Critical route products",
+            "current_days_cover": max(3, round(10 - (final_risk / 15))),
+            "recommended_days_cover": max(7, round(14 - (final_risk / 20))),
+            "increase_percent": max(10, round(final_risk * 0.6)),
+        },
         "scenarios": scenarios,
     }
-
-
-async def get_mitigation_by_alert_id(alert_id: str):
-    alert = await db.alerts.find_one({"alert_id": alert_id}, {"_id": 0})
-
-    if not alert:
-        return None
-
-    return build_mitigation_payload(alert)

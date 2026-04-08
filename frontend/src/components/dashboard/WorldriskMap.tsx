@@ -13,7 +13,10 @@ type Props = {
 
 const DEFAULT_CENTER: [number, number] = [20, 20];
 const DEFAULT_ZOOM = 0.7;
-const FOCUS_ZOOM = 1.45;
+const FOCUS_ZOOM = 2.5;
+
+const PANEL_TRANSITION_MS = 360;
+const CAMERA_DELAY_ON_LAYOUT_MS = 220;
 
 function getPopupHtml(alert: AlertItem) {
   const levelColor =
@@ -139,36 +142,36 @@ function WorldRiskMap({
   onSelectAlert,
   panelOpen = false,
 }: Props) {
-  const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
 
-  const pulseFrameRef = useRef<number | null>(null);
-  const pulsePhaseRef = useRef(0);
-
   const hasLoadedRef = useRef(false);
-  const cameraAnimatingRef = useRef(false);
   const hoveredIdRef = useRef<string | null>(null);
-  const prevActiveIdRef = useRef<string | null>(selectedAlertId);
+  const isCameraMovingRef = useRef(false);
 
-  const pendingCameraTimerRef = useRef<number | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const pulseFrameRef = useRef<number | null>(null);
+  const resizeLoopFrameRef = useRef<number | null>(null);
+  const cameraTimerRef = useRef<number | null>(null);
 
   const alertsRef = useRef<AlertItem[]>(alerts);
-  const onSelectAlertRef = useRef(onSelectAlert);
   const selectedAlertIdRef = useRef<string | null>(selectedAlertId);
+  const onSelectAlertRef = useRef(onSelectAlert);
+
+  const lastCameraKeyRef = useRef<string>("__initial__");
+  const previousPanelOpenRef = useRef<boolean>(panelOpen);
 
   useEffect(() => {
     alertsRef.current = alerts;
   }, [alerts]);
 
   useEffect(() => {
-    onSelectAlertRef.current = onSelectAlert;
-  }, [onSelectAlert]);
-
-  useEffect(() => {
     selectedAlertIdRef.current = selectedAlertId;
   }, [selectedAlertId]);
+
+  useEffect(() => {
+    onSelectAlertRef.current = onSelectAlert;
+  }, [onSelectAlert]);
 
   const validAlerts = useMemo(() => {
     return alerts.filter((alert) => isValidCoordinatePair(alert.coordinates));
@@ -249,29 +252,51 @@ function WorldRiskMap({
     }
   };
 
-  const applyCameraToSelection = () => {
+  const runResizeLoop = (duration = PANEL_TRANSITION_MS) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (resizeLoopFrameRef.current !== null) {
+      cancelAnimationFrame(resizeLoopFrameRef.current);
+      resizeLoopFrameRef.current = null;
+    }
+
+    const startedAt = performance.now();
+
+    const tick = (now: number) => {
+      map.resize();
+
+      if (now - startedAt < duration) {
+        resizeLoopFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        resizeLoopFrameRef.current = null;
+        map.resize();
+      }
+    };
+
+    resizeLoopFrameRef.current = requestAnimationFrame(tick);
+  };
+
+  const runCameraNow = () => {
     const map = mapRef.current;
     if (!map || !hasLoadedRef.current) return;
 
-    if (pendingCameraTimerRef.current !== null) {
-      window.clearTimeout(pendingCameraTimerRef.current);
-      pendingCameraTimerRef.current = null;
-    }
-
     const activeId = selectedAlertIdRef.current;
+    const cameraKey = `${activeId ?? "none"}|${panelOpen ? "open" : "closed"}`;
+
+    if (lastCameraKeyRef.current === cameraKey) return;
+    lastCameraKeyRef.current = cameraKey;
 
     if (!activeId) {
-      cameraAnimatingRef.current = true;
       map.stop();
+      isCameraMovingRef.current = true;
       map.easeTo({
         center: DEFAULT_CENTER,
         zoom: DEFAULT_ZOOM,
-        duration: 850,
+        duration: 650,
         essential: true,
-        easing: (t) => 1 - Math.pow(1 - t, 2.2),
+        easing: (t) => 1 - Math.pow(1 - t, 2.15),
       });
-      
-      prevActiveIdRef.current = null;
       return;
     }
 
@@ -280,44 +305,25 @@ function WorldRiskMap({
       return;
     }
 
+    const [targetLng, targetLat] = selectedAlert.coordinates;
     const currentCenter = map.getCenter();
     const currentZoom = map.getZoom();
-    const [targetLng, targetLat] = selectedAlert.coordinates;
 
-    const lngDiff = Math.abs(currentCenter.lng - targetLng);
-    const latDiff = Math.abs(currentCenter.lat - targetLat);
-    const zoomDiff = Math.abs(currentZoom - FOCUS_ZOOM);
+    const alreadyNearTarget =
+      Math.abs(currentCenter.lng - targetLng) < 0.08 &&
+      Math.abs(currentCenter.lat - targetLat) < 0.08 &&
+      Math.abs(currentZoom - FOCUS_ZOOM) < 0.08;
 
-    // Prevent redundant camera movements if already there
-    if (lngDiff < 0.12 && latDiff < 0.12 && zoomDiff < 0.12) {
-      prevActiveIdRef.current = activeId;
-      return;
-    }
+    if (alreadyNearTarget) return;
 
-    const wasOpen = prevActiveIdRef.current !== null;
-    const isLayoutChanging = !wasOpen; // Panel is opening
-    
-    prevActiveIdRef.current = activeId;
-    cameraAnimatingRef.current = true;
     map.stop();
-
-    if (isLayoutChanging || panelOpen) {
-      map.easeTo({
-        center: selectedAlert.coordinates,
-        zoom: FOCUS_ZOOM,
-        duration: 360,
-        essential: true,
-        easing: (t) => 1 - Math.pow(1 - t, 3),
-      });
-      return;
-    }
-
-    map.flyTo({
+    isCameraMovingRef.current = true;
+    map.easeTo({
       center: selectedAlert.coordinates,
       zoom: FOCUS_ZOOM,
-      speed: 0.9,
-      curve: 1.15,
+      duration: 520,
       essential: true,
+      easing: (t) => 1 - Math.pow(1 - t, 2.35),
     });
   };
 
@@ -357,94 +363,87 @@ function WorldRiskMap({
     map.on("load", () => {
       hasLoadedRef.current = true;
 
-      if (!map.getSource("alerts-source")) {
-        map.addSource("alerts-source", {
-          type: "geojson",
-          data: geoJson,
-        });
-      }
+      map.addSource("alerts-source", {
+        type: "geojson",
+        data: geoJson,
+      });
 
-      if (!map.getLayer("alerts-glow")) {
-        map.addLayer({
-          id: "alerts-glow",
-          type: "circle",
-          source: "alerts-source",
-          paint: {
-            "circle-radius": 16,
-            "circle-color": [
-              "match",
-              ["get", "level"],
-              "critical",
-              "#fb7185",
-              "warning",
-              "#fbbf24",
-              "#22d3ee",
-            ],
-            "circle-opacity": 0.35,
-            "circle-blur": 1.4,
-          },
-        });
-      }
+      map.addLayer({
+        id: "alerts-glow",
+        type: "circle",
+        source: "alerts-source",
+        paint: {
+          "circle-radius": 16,
+          "circle-color": [
+            "match",
+            ["get", "level"],
+            "critical",
+            "#fb7185",
+            "warning",
+            "#fbbf24",
+            "#22d3ee",
+          ],
+          "circle-opacity": 0.35,
+          "circle-blur": 1.4,
+        },
+      });
 
-      if (!map.getLayer("alerts-pulse")) {
-        map.addLayer({
-          id: "alerts-pulse",
-          type: "circle",
-          source: "alerts-source",
-          paint: {
-            "circle-radius": [
-              "case",
-              ["==", ["get", "level"], "critical"],
-              13,
-              ["==", ["get", "level"], "warning"],
-              11,
-              0,
-            ],
-            "circle-color": [
-              "match",
-              ["get", "level"],
-              "critical",
-              "#fb7185",
-              "warning",
-              "#fbbf24",
-              "#22d3ee",
-            ],
-            "circle-opacity": [
-              "case",
-              ["==", ["get", "level"], "critical"],
-              0.2,
-              ["==", ["get", "level"], "warning"],
-              0.12,
-              0,
-            ],
-            "circle-blur": 0.9,
-          },
-        });
-      }
+      map.addLayer({
+        id: "alerts-pulse",
+        type: "circle",
+        source: "alerts-source",
+        paint: {
+          "circle-radius": [
+            "case",
+            ["==", ["get", "level"], "critical"],
+            13,
+            ["==", ["get", "level"], "warning"],
+            11,
+            0,
+          ],
+          "circle-color": [
+            "match",
+            ["get", "level"],
+            "critical",
+            "#fb7185",
+            "warning",
+            "#fbbf24",
+            "#22d3ee",
+          ],
+          "circle-opacity": [
+            "case",
+            ["==", ["get", "level"], "critical"],
+            0.2,
+            ["==", ["get", "level"], "warning"],
+            0.12,
+            0,
+          ],
+          "circle-blur": 0.9,
+        },
+      });
 
-      if (!map.getLayer("alerts-points")) {
-        map.addLayer({
-          id: "alerts-points",
-          type: "circle",
-          source: "alerts-source",
-          paint: {
-            "circle-radius": 6,
-            "circle-color": [
-              "match",
-              ["get", "level"],
-              "critical",
-              "#fb7185",
-              "warning",
-              "#fbbf24",
-              "#22d3ee",
-            ],
-            "circle-stroke-color": "rgba(15,23,42,0.95)",
-            "circle-stroke-width": 1.5,
-          },
-        });
-      }
+      map.addLayer({
+        id: "alerts-points",
+        type: "circle",
+        source: "alerts-source",
+        paint: {
+          "circle-radius": 6,
+          "circle-color": [
+            "match",
+            ["get", "level"],
+            "critical",
+            "#fb7185",
+            "warning",
+            "#fbbf24",
+            "#22d3ee",
+          ],
+          "circle-stroke-color": "rgba(15,23,42,0.95)",
+          "circle-stroke-width": 1.5,
+        },
+      });
 
       const showPopupFromFeature = (feature: MapGeoJSONFeature | undefined) => {
+        if (isCameraMovingRef.current) return;
         if (!isPointFeature(feature)) return;
 
         const id = feature.properties?.id;
@@ -499,116 +498,87 @@ function WorldRiskMap({
       });
 
       map.on("movestart", () => {
-        cameraAnimatingRef.current = true;
+        isCameraMovingRef.current = true;
       });
 
       map.on("moveend", () => {
-        cameraAnimatingRef.current = false;
+        isCameraMovingRef.current = false;
       });
 
       syncSourceData();
       applySelectionStyles();
-      applyCameraToSelection();
+      runCameraNow();
     });
 
     return () => {
       hasLoadedRef.current = false;
+
       popupRef.current?.remove();
+      popupRef.current = null;
 
       if (pulseFrameRef.current !== null) {
         cancelAnimationFrame(pulseFrameRef.current);
         pulseFrameRef.current = null;
       }
 
-      if (pendingCameraTimerRef.current !== null) {
-        window.clearTimeout(pendingCameraTimerRef.current);
-        pendingCameraTimerRef.current = null;
+      if (resizeLoopFrameRef.current !== null) {
+        cancelAnimationFrame(resizeLoopFrameRef.current);
+        resizeLoopFrameRef.current = null;
       }
 
-      if (resizeObserverRef.current) {
-        resizeObserverRef.current.disconnect();
-        resizeObserverRef.current = null;
+      if (cameraTimerRef.current !== null) {
+        window.clearTimeout(cameraTimerRef.current);
+        cameraTimerRef.current = null;
       }
 
       map.remove();
-      popupRef.current = null;
       mapRef.current = null;
-    };
-  }, [geoJson]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const container = containerRef.current;
-    if (!map || !container) return;
-
-    if (resizeObserverRef.current) {
-      resizeObserverRef.current.disconnect();
-      resizeObserverRef.current = null;
-    }
-
-    resizeObserverRef.current = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        if (mapRef.current) {
-          mapRef.current.resize();
-        }
-      });
-    });
-
-    resizeObserverRef.current.observe(container);
-
-    requestAnimationFrame(() => {
-      map.resize();
-    });
-
-    return () => {
-      if (resizeObserverRef.current) {
-        resizeObserverRef.current.disconnect();
-        resizeObserverRef.current = null;
-      }
     };
   }, []);
 
   useEffect(() => {
     if (!hasLoadedRef.current) return;
     syncSourceData();
-    applySelectionStyles();
   }, [geoJson]);
 
   useEffect(() => {
     if (!hasLoadedRef.current) return;
-    syncSourceData();
     applySelectionStyles();
-    applyCameraToSelection();
-  }, [selectedAlertId, alerts, panelOpen]);
+  }, [selectedAlertId]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !hasLoadedRef.current) return;
+    if (!hasLoadedRef.current) return;
 
-    if (hoveredIdRef.current) {
-      const hoveredAlert = alertsRef.current.find(
-        (a) => a.id === hoveredIdRef.current
-      );
+    const panelChanged = previousPanelOpenRef.current !== panelOpen;
+    previousPanelOpenRef.current = panelOpen;
 
-      if (hoveredAlert && isValidCoordinatePair(hoveredAlert.coordinates)) {
-        popupRef.current
-          ?.setLngLat(hoveredAlert.coordinates)
-          .setHTML(getPopupHtml(hoveredAlert))
-          .addTo(map);
-      } else {
-        popupRef.current?.remove();
-        hoveredIdRef.current = null;
-      }
+    if (cameraTimerRef.current !== null) {
+      window.clearTimeout(cameraTimerRef.current);
+      cameraTimerRef.current = null;
     }
-  }, [geoJson, alerts]);
+
+    if (panelChanged) {
+      runResizeLoop(PANEL_TRANSITION_MS);
+
+      cameraTimerRef.current = window.setTimeout(() => {
+        runCameraNow();
+      }, CAMERA_DELAY_ON_LAYOUT_MS);
+
+      return;
+    }
+
+    runCameraNow();
+  }, [selectedAlertId, panelOpen]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
+    let pulsePhase = 0;
+
     const animatePulse = () => {
-      pulsePhaseRef.current += 0.045;
-      const wave = (Math.sin(pulsePhaseRef.current) + 1) / 2;
+      pulsePhase += 0.045;
+      const wave = (Math.sin(pulsePhase) + 1) / 2;
       const activeId = selectedAlertIdRef.current ?? "";
 
       if (map.getLayer("alerts-pulse")) {
@@ -638,10 +608,6 @@ function WorldRiskMap({
       pulseFrameRef.current = requestAnimationFrame(animatePulse);
     };
 
-    if (pulseFrameRef.current !== null) {
-      cancelAnimationFrame(pulseFrameRef.current);
-    }
-
     pulseFrameRef.current = requestAnimationFrame(animatePulse);
 
     return () => {
@@ -651,6 +617,28 @@ function WorldRiskMap({
       }
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !hasLoadedRef.current) return;
+    if (isCameraMovingRef.current) return;
+    if (!hoveredIdRef.current) return;
+
+    const hoveredAlert = alertsRef.current.find(
+      (a) => a.id === hoveredIdRef.current
+    );
+
+    if (!hoveredAlert || !isValidCoordinatePair(hoveredAlert.coordinates)) {
+      hoveredIdRef.current = null;
+      popupRef.current?.remove();
+      return;
+    }
+
+    popupRef.current
+      ?.setLngLat(hoveredAlert.coordinates)
+      .setHTML(getPopupHtml(hoveredAlert))
+      .addTo(map);
+  }, [alerts]);
 
   return (
     <div

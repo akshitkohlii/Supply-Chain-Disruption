@@ -31,6 +31,22 @@ type MitigationScenarioComparisonProps = {
   selectedAlertId?: string | null;
 };
 
+function formatCurrencyCompact(value: number) {
+  if (!Number.isFinite(value)) return "—";
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
+function rankScenario(scenario: Scenario) {
+  return (
+    scenario.riskScore * 8 +
+    scenario.delayHours * 2 +
+    scenario.recoveryDays * 12 +
+    scenario.costImpact / 1000
+  );
+}
+
 export default function MitigationScenarioComparison({
   recommendation,
   scenarios,
@@ -61,29 +77,21 @@ export default function MitigationScenarioComparison({
   const baseline = scenarios[0];
 
   const bestScenario = scenarios.reduce((best, current) => {
-    const bestScore =
-      best.riskScore + best.delayHours + best.recoveryDays * 10 + best.costImpact;
-    const currentScore =
-      current.riskScore +
-      current.delayHours +
-      current.recoveryDays * 10 +
-      current.costImpact;
-
-    return currentScore < bestScore ? current : best;
+    return rankScenario(current) < rankScenario(best) ? current : best;
   });
 
   const radarData = scenarios.map((scenario) => ({
     scenario: scenario.label,
-    risk: scenario.riskScore,
+    risk: Math.min(100, scenario.riskScore),
     delay: Math.min(100, scenario.delayHours * 4),
     recovery: Math.min(100, scenario.recoveryDays * 20),
-    cost: Math.min(100, scenario.costImpact * 8),
+    cost: Math.min(100, scenario.costImpact / 250),
   }));
 
   return (
     <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden">
       <div className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4">
-        <MetricCard label="Confidence" value={`${recommendation.confidence}%`} />
+        <MetricCard label="Confidence" value={`${(recommendation.confidence)*100}%`} />
         <MetricCard label="Risk Reduction" value={`-${recommendation.impactReduction}%`} />
         <MetricCard label="Baseline Risk" value={`${baseline.riskScore}`} />
         <MetricCard label="Best Option" value={bestScenario.label} compact />
@@ -98,8 +106,8 @@ export default function MitigationScenarioComparison({
             </p>
           </div>
 
-          <div className="mt-4 min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-800/70">
-            <div className="grid grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.8fr] gap-x-3 bg-slate-950/70 px-4 py-3 text-[11px] uppercase tracking-[0.16em] text-slate-500">
+          <div className="mt-4 min-h-0 flex flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800/70">
+            <div className="grid shrink-0 grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.9fr] gap-x-3 bg-slate-950/70 px-4 py-3 text-[11px] uppercase tracking-[0.16em] text-slate-500">
               <div>Scenario</div>
               <div>Risk</div>
               <div>Delay</div>
@@ -107,7 +115,7 @@ export default function MitigationScenarioComparison({
               <div>Cost</div>
             </div>
 
-            <div className="h-full overflow-y-auto divide-y divide-slate-800/70">
+            <div className="min-h-0 flex-1 divide-y divide-slate-800/70 overflow-y-auto">
               {scenarios.map((scenario) => {
                 const isBaseline = scenario.id === baseline.id;
                 const isBest = scenario.id === bestScenario.id;
@@ -115,12 +123,12 @@ export default function MitigationScenarioComparison({
                 return (
                   <div
                     key={scenario.id}
-                    className={`grid grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.8fr] items-center gap-x-3 px-4 py-4 text-sm ${
+                    className={`grid grid-cols-[1.8fr_0.85fr_0.9fr_1fr_0.9fr] items-center gap-x-3 px-4 py-4 text-sm ${
                       isBest
                         ? "bg-emerald-500/8"
                         : isBaseline
-                        ? "bg-slate-950/60"
-                        : "bg-slate-900/35"
+                          ? "bg-slate-950/60"
+                          : "bg-slate-900/35"
                     }`}
                   >
                     <div className="pr-3">
@@ -142,7 +150,7 @@ export default function MitigationScenarioComparison({
                     <CellValue value={`${scenario.riskScore}`} />
                     <CellValue value={`${scenario.delayHours}h`} />
                     <CellValue value={`${scenario.recoveryDays}d`} />
-                    <CellValue value={`+${scenario.costImpact}%`} />
+                    <CellValue value={formatCurrencyCompact(scenario.costImpact)} />
                   </div>
                 );
               })}
@@ -173,7 +181,7 @@ export default function MitigationScenarioComparison({
             <MitigationRadarChart data={radarData} />
           </div>
 
-          <div className="mt-4 shrink-0 grid grid-cols-2 gap-3">
+          <div className="mt-4 grid shrink-0 grid-cols-2 gap-3">
             <MiniStat label="Selected Strategy" value={recommendation.title} compact />
             <MiniStat label="Compared" value={`${scenarios.length}`} />
           </div>

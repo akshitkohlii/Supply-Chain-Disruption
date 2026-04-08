@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+
 from app.api.v1.health import router as health_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.suppliers import router as suppliers_router
@@ -7,6 +8,7 @@ from app.api.v1.map import router as map_router
 from app.api.v1.logistics import router as logistics_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.mitigation import router as mitigation_router
+from app.api.v1.signals import router as signals_router
 
 api_router = APIRouter()
 
@@ -18,3 +20,4 @@ api_router.include_router(map_router, prefix="/map", tags=["map"])
 api_router.include_router(logistics_router, prefix="/logistics", tags=["logistics"])
 api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(mitigation_router, prefix="/mitigation", tags=["mitigation"])
+api_router.include_router(signals_router, prefix="/signals", tags=["signals"])

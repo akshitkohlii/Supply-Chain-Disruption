@@ -1,14 +1,15 @@
 from fastapi import APIRouter, HTTPException
-from app.services.mitigation_service import get_mitigation_by_alert_id
+
+from app.services.mitigation_service import get_mitigation_plan
 
 router = APIRouter()
 
 
 @router.get("/{alert_id}")
-async def mitigation_by_alert_id(alert_id: str):
-    result = await get_mitigation_by_alert_id(alert_id)
-
-    if not result:
-        raise HTTPException(status_code=404, detail="Mitigation plan not found")
-
-    return result
+async def mitigation_plan(alert_id: str):
+    try:
+      return await get_mitigation_plan(alert_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+      raise HTTPException(status_code=500, detail=f"Failed to build mitigation plan: {exc}")

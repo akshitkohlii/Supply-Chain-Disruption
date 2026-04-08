@@ -37,62 +37,53 @@ function getBarColor(value: number) {
   return "bg-cyan-400";
 }
 
-function toPercent(value?: number) {
+function normalizeScore(value?: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return 0;
-  return Math.max(0, Math.min(100, Math.round(value * 100)));
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function buildDrivers(selectedAlert: AlertItem) {
-  const weather = toPercent(selectedAlert.weatherRisk);
-  const congestion = toPercent(selectedAlert.portCongestion);
-  const delay = Math.max(
-    0,
-    Math.min(100, Math.round(((selectedAlert.delayHours ?? 0) / 48) * 100))
-  );
+  const weather = normalizeScore(selectedAlert.weatherRisk);
+  const news = normalizeScore(selectedAlert.newsScore);
+  const logistics = normalizeScore(selectedAlert.logisticsScore);
+  const congestion = normalizeScore(selectedAlert.congestionScore);
 
   const drivers = [
+    { label: "News Pressure", value: news },
     { label: "Weather Exposure", value: weather },
+    { label: "Logistics Pressure", value: logistics },
     { label: "Port Congestion", value: congestion },
-    { label: "Delay Pressure", value: delay },
   ];
 
   return drivers.sort((a, b) => b.value - a.value);
 }
 
 function buildRiskScore(selectedAlert: AlertItem) {
-  const weather = toPercent(selectedAlert.weatherRisk);
-  const congestion = toPercent(selectedAlert.portCongestion);
-  const delay = Math.max(
-    0,
-    Math.min(100, Math.round(((selectedAlert.delayHours ?? 0) / 48) * 100))
-  );
+  if (typeof selectedAlert.finalRiskScore === "number") {
+    return normalizeScore(selectedAlert.finalRiskScore);
+  }
 
-  const levelBase =
-    selectedAlert.level === "critical"
-      ? 78
-      : selectedAlert.level === "warning"
-        ? 58
-        : 34;
+  const weather = normalizeScore(selectedAlert.weatherRisk);
+  const news = normalizeScore(selectedAlert.newsScore);
+  const logistics = normalizeScore(selectedAlert.logisticsScore);
+  const congestion = normalizeScore(selectedAlert.congestionScore);
 
-  return Math.max(
-    0,
-    Math.min(
-      100,
-      Math.round(levelBase * 0.45 + weather * 0.2 + congestion * 0.2 + delay * 0.15)
-    )
+  return Math.round(
+    weather * 0.25 + news * 0.2 + logistics * 0.3 + congestion * 0.25
   );
 }
 
 function buildConfidence(selectedAlert: AlertItem) {
   const availableSignals = [
-    typeof selectedAlert.delayHours === "number",
     typeof selectedAlert.weatherRisk === "number",
-    typeof selectedAlert.portCongestion === "number",
+    typeof selectedAlert.newsScore === "number",
+    typeof selectedAlert.logisticsScore === "number",
+    typeof selectedAlert.congestionScore === "number",
     !!selectedAlert.region,
     !!selectedAlert.country,
   ].filter(Boolean).length;
 
-  return Math.min(96, 52 + availableSignals * 9);
+  return Math.min(96, 52 + availableSignals * 7);
 }
 
 export default function RightRail({
@@ -264,10 +255,10 @@ export default function RightRail({
 
                     <div className="mt-4 space-y-3 text-xs text-slate-300">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-slate-500">Delay Impact</span>
+                        <span className="text-slate-500">Final Risk</span>
                         <span className="font-medium text-white">
-                          {typeof selectedAlert.delayHours === "number"
-                            ? `${selectedAlert.delayHours.toFixed(1)} hours`
+                          {typeof selectedAlert.finalRiskScore === "number"
+                            ? selectedAlert.finalRiskScore
                             : "N/A"}
                         </span>
                       </div>
@@ -276,7 +267,25 @@ export default function RightRail({
                         <span className="text-slate-500">Weather Exposure</span>
                         <span className="font-medium text-white">
                           {typeof selectedAlert.weatherRisk === "number"
-                            ? `${toPercent(selectedAlert.weatherRisk)}%`
+                            ? `${normalizeScore(selectedAlert.weatherRisk)}%`
+                            : "N/A"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">News Pressure</span>
+                        <span className="font-medium text-white">
+                          {typeof selectedAlert.newsScore === "number"
+                            ? `${normalizeScore(selectedAlert.newsScore)}%`
+                            : "N/A"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">Logistics Pressure</span>
+                        <span className="font-medium text-white">
+                          {typeof selectedAlert.logisticsScore === "number"
+                            ? `${normalizeScore(selectedAlert.logisticsScore)}%`
                             : "N/A"}
                         </span>
                       </div>
@@ -284,8 +293,8 @@ export default function RightRail({
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-slate-500">Port Congestion</span>
                         <span className="font-medium text-white">
-                          {typeof selectedAlert.portCongestion === "number"
-                            ? `${toPercent(selectedAlert.portCongestion)}%`
+                          {typeof selectedAlert.congestionScore === "number"
+                            ? `${normalizeScore(selectedAlert.congestionScore)}%`
                             : "N/A"}
                         </span>
                       </div>
