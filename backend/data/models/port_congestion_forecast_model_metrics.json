@@ -1,0 +1,9 @@
+{
+  "mae": {
+    "target_congestion_score": 1.1688577823855681
+  },
+  "r2": {
+    "target_congestion_score": 0.9893791380442849
+  },
+  "rows": 20000
+}

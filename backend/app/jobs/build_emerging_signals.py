@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.emerging_signal_store_service import build_emerging_signals
+from app.services.emerging_signal_service import build_emerging_signals
 
 
 async def main():

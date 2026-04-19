@@ -1,420 +1,120 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 
 import Topbar from "@/components/dashboard/Topbar";
 import SearchFilters from "@/components/dashboard/SearchFilters";
 import KpiGrid from "@/components/dashboard/KpiGrid";
 import MainMapSection from "@/components/dashboard/MainMapSection";
-import MidCardsSection from "@/components/dashboard/MidCardsSection";
-import BottomSection from "@/components/dashboard/BottomSection";
 import RightRail from "@/components/dashboard/RightRail";
 
+import { buildDashboardKpisFromApi } from "@/lib/mappers";
+import { applyAlertThresholds } from "@/lib/mappers";
+import { useAppSettings } from "@/features/dashboard/hooks/useAppSettings";
+import { useDashboardData } from "@/features/dashboard/hooks/useDashboardData";
+import { useDashboardFilters } from "@/features/dashboard/hooks/useDashboardFilters";
+import { useDashboardSelection } from "@/features/dashboard/hooks/useDashboardSelection";
 import {
-  getAlertSummary,
-  getAlerts,
-  getAnalyticsForecast,
-  getAnalyticsOverview,
-  getDashboardOverview,
-  getEmergingSignals,
-  getLanePressure,
-  getMlRoutePrediction,
-  getSupplierExposure,
-  updateAlertStatus,
-  type ApiAnalyticsOverview,
-  type ApiEmergingSignal,
-  type ApiForecastPoint,
-  type ApiLanePressureItem,
-  type ApiRoutePrediction,
-  type ApiSupplierExposureItem,
-} from "@/lib/api";
+  buildMapVisibleAlerts,
+  buildNotificationAlerts,
+  buildVisibleAlerts,
+  filterAlerts,
+} from "@/features/dashboard/lib/selectors";
 
-import {
-  buildDashboardKpisFromApi,
-  mapApiAlertToUiAlert,
-  type AlertItem,
-} from "@/lib/mappers";
-
-type LayerFilter = "all" | "supplier" | "port" | "climate" | "geo" | "logistics";
-type LevelFilter = "all" | "stable" | "warning" | "critical";
-type ScopeFilter = "Global" | "Regional";
-type TimeFilter = "Last 24 Hours" | "Last 7 Days" | "Last 30 Days";
-type StatusFilter = "All" | "Alerts" | "Acknowledged" | "Resolved";
-
-function levelRank(level: AlertItem["level"]) {
-  if (level === "critical") return 3;
-  if (level === "warning") return 2;
-  return 1;
-}
-
-function scoreAlert(alert: AlertItem) {
-  const finalRisk = alert.finalRiskScore ?? 0;
-  const ml = alert.mlRiskScore ?? 0;
-  const weather = alert.weatherRisk ?? 0;
-  const news = alert.newsScore ?? 0;
-  const logistics = alert.logisticsScore ?? 0;
-  const congestion = alert.congestionScore ?? alert.portCongestion ?? 0;
-
-  return (
-    levelRank(alert.level) * 1000 +
-    finalRisk * 10 +
-    ml * 5 +
-    weather +
-    news +
-    logistics +
-    congestion
-  );
-}
-
-function dedupeHighestRiskPerAnchorPort(alerts: AlertItem[]) {
-  const byAnchor = new Map<string, AlertItem>();
-
-  for (const alert of alerts) {
-    const [lng, lat] = alert.coordinates;
-    if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) {
-      continue;
-    }
-
-    const anchor = alert.anchorPort ?? alert.destinationPort ?? alert.location;
-    const key = `${anchor}|${alert.country}`;
-
-    const existing = byAnchor.get(key);
-    if (!existing || scoreAlert(alert) > scoreAlert(existing)) {
-      byAnchor.set(key, alert);
-    }
+const MidCardsSection = dynamic(
+  () => import("@/components/dashboard/MidCardsSection"),
+  {
+    loading: () => (
+      <div className="rounded-2xl border border-slate-800/70 bg-slate-950/40 p-6 text-sm text-slate-400">
+        Loading analytics panels...
+      </div>
+    ),
   }
+);
 
-  return Array.from(byAnchor.values());
-}
-
-function matchesRegionFilter(alert: AlertItem, selectedRegion: string) {
-  if (selectedRegion === "All Regions") return true;
-
-  const regionValue = (alert.region ?? "").toLowerCase();
-  const countryValue = alert.country.toLowerCase();
-  const selected = selectedRegion.toLowerCase();
-
-  return regionValue === selected || countryValue === selected;
-}
-
-function matchesBusinessUnitFilter(alert: AlertItem, selectedUnit: string) {
-  if (selectedUnit === "All Units") return true;
-  return (alert.businessUnit ?? "").toLowerCase() === selectedUnit.toLowerCase();
-}
-
-function matchesRiskLevelFilter(alert: AlertItem, selectedRisk: string) {
-  if (selectedRisk === "All Levels") return true;
-  return alert.level === selectedRisk.toLowerCase();
-}
-
-function matchesStatusFilter(alert: AlertItem, selectedStatus: StatusFilter) {
-  if (selectedStatus === "All") return true;
-  if (selectedStatus === "Alerts") return alert.status === "active";
-  if (selectedStatus === "Acknowledged") return alert.status === "acknowledged";
-  return alert.status === "resolved";
-}
-
-function matchesScopeFilter(alert: AlertItem, selectedScope: ScopeFilter) {
-  if (selectedScope === "Global") return true;
-  return ["asia", "europe", "north america", "south america"].includes(
-    (alert.region ?? "").toLowerCase()
-  );
-}
-
-function matchesSearchFilter(alert: AlertItem, q: string) {
-  if (!q) return true;
-
-  return [
-    alert.title,
-    alert.location,
-    alert.country,
-    alert.region ?? "",
-    alert.businessUnit ?? "",
-    alert.category,
-    alert.summary,
-    alert.status,
-    alert.supplierName ?? "",
-    alert.routeKey ?? "",
-    alert.originPort ?? "",
-    alert.destinationPort ?? "",
-  ]
-    .join(" ")
-    .toLowerCase()
-    .includes(q);
-}
+const BottomSection = dynamic(
+  () => import("@/components/dashboard/BottomSection"),
+  {
+    loading: () => (
+      <div className="rounded-2xl border border-slate-800/70 bg-slate-950/40 p-6 text-sm text-slate-400">
+        Loading mitigation panels...
+      </div>
+    ),
+  }
+);
 
 export default function DashboardPage() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
-
-  const [activeLayer, setActiveLayer] = useState<LayerFilter>("all");
-  const [activeLevel, setActiveLevel] = useState<LevelFilter>("all");
-
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-
-  const [region, setRegion] = useState("All Regions");
-  const [businessUnit, setBusinessUnit] = useState("All Units");
-  const [riskLevel, setRiskLevel] = useState("All Levels");
-
-  const [scope, setScope] = useState<ScopeFilter>("Global");
-  const [timeRange, setTimeRange] = useState<TimeFilter>("Last 7 Days");
-  const [status, setStatus] = useState<StatusFilter>("All");
-  const [midIsLoading, setMidIsLoading] = useState(true);
-
-  const [forecastData, setForecastData] = useState<ApiForecastPoint[]>([]);
-  const [supplierExposureData, setSupplierExposureData] = useState<ApiSupplierExposureItem[]>([]);
-  const [lanePressureData, setLanePressureData] = useState<ApiLanePressureItem[]>([]);
-  const [analyticsOverview, setAnalyticsOverview] = useState<ApiAnalyticsOverview | null>(null);
-
-  const [emergingSignals, setEmergingSignals] = useState<ApiEmergingSignal[]>([]);
-  const [emergingSignalsLoading, setEmergingSignalsLoading] = useState(true);
-  const [emergingSignalsError, setEmergingSignalsError] = useState<string | null>(null);
-
-  const [selectedMlPrediction, setSelectedMlPrediction] =
-    useState<ApiRoutePrediction | null>(null);
-  const [mlPredictionLoading, setMlPredictionLoading] = useState(false);
-  const [mlPredictionError, setMlPredictionError] = useState<string | null>(null);
-
-  const [kpis, setKpis] = useState<
-    {
-      title: string;
-      value: string;
-      change: string;
-      trend: "up" | "down" | "neutral";
-      risk: "low" | "medium" | "high";
-    }[]
-  >([]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput);
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
-  useEffect(() => {
-    async function loadDashboard() {
-      try {
-        setIsLoading(true);
-        setMidIsLoading(true);
-        setEmergingSignalsLoading(true);
-        setError(null);
-        setEmergingSignalsError(null);
-
-        const dashboardOverview = await getDashboardOverview();
-        const alertSummary = await getAlertSummary();
-        const alertsRes = await getAlerts(50);
-
-        let analyticsOverviewRes: ApiAnalyticsOverview | null = null;
-        let forecastRes: ApiForecastPoint[] = [];
-        let supplierExposureRes: ApiSupplierExposureItem[] = [];
-        let lanePressureRes: ApiLanePressureItem[] = [];
-        let emergingSignalsRes: ApiEmergingSignal[] = [];
-
-        try {
-          analyticsOverviewRes = await getAnalyticsOverview();
-        } catch (e) {
-          console.error("analytics overview failed", e);
-        }
-
-        try {
-          forecastRes = await getAnalyticsForecast();
-        } catch (e) {
-          console.error("forecast failed", e);
-        }
-
-        try {
-          supplierExposureRes = await getSupplierExposure();
-        } catch (e) {
-          console.error("supplier exposure failed", e);
-        }
-
-        try {
-          lanePressureRes = await getLanePressure();
-        } catch (e) {
-          console.error("lane pressure failed", e);
-        }
-
-        try {
-          emergingSignalsRes = await getEmergingSignals({
-            limit: 6,
-            relevantOnly: true,
-          });
-        } catch (e) {
-          console.error("emerging signals failed", e);
-          setEmergingSignalsError(
-            e instanceof Error ? e.message : "Failed to load emerging signals"
-          );
-        }
-
-        const uiAlerts = alertsRes.map(mapApiAlertToUiAlert);
-
-        setAlerts(uiAlerts);
-
-        setKpis(
-          buildDashboardKpisFromApi({
-            dashboardOverview,
-            alertSummary,
-          })
-        );
-
-        setAnalyticsOverview(analyticsOverviewRes);
-        setForecastData(forecastRes);
-        setSupplierExposureData(supplierExposureRes);
-        setLanePressureData(lanePressureRes);
-        setEmergingSignals(emergingSignalsRes);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load dashboard");
-      } finally {
-        setIsLoading(false);
-        setMidIsLoading(false);
-        setEmergingSignalsLoading(false);
-      }
-    }
-
-    loadDashboard();
-  }, []);
-
-  const normalizedSearch = useMemo(() => search.trim().toLowerCase(), [search]);
-
-  const filteredAlerts = useMemo(() => {
-    return alerts.filter((alert) => {
-      const matchesSearch = matchesSearchFilter(alert, normalizedSearch);
-      const matchesLayer = activeLayer === "all" ? true : alert.category === activeLayer;
-      const matchesLegendLevel = activeLevel === "all" ? true : alert.level === activeLevel;
-      const matchesRiskLevel = matchesRiskLevelFilter(alert, riskLevel);
-      const matchesRegion = matchesRegionFilter(alert, region);
-      const matchesBusinessUnit = matchesBusinessUnitFilter(alert, businessUnit);
-      const matchesScope = matchesScopeFilter(alert, scope);
-      const matchesStatus = matchesStatusFilter(alert, status);
-
-      return (
-        matchesSearch &&
-        matchesLayer &&
-        matchesLegendLevel &&
-        matchesRiskLevel &&
-        matchesRegion &&
-        matchesBusinessUnit &&
-        matchesScope &&
-        matchesStatus
-      );
-    });
-  }, [
-    alerts,
-    normalizedSearch,
-    activeLayer,
-    activeLevel,
-    riskLevel,
+  const data = useDashboardData();
+  const settings = useAppSettings();
+  const {
+    filters,
+    searchInput,
+    setSearchInput,
     region,
+    setRegion,
     businessUnit,
+    setBusinessUnit,
+    riskLevel,
+    handleRiskLevelChange,
+    activeLayer,
+    setActiveLayer,
+    activeLevel,
+    setActiveLevel,
     scope,
+    setScope,
+    timeRange,
+    setTimeRange,
     status,
-  ]);
+    setStatus,
+  } = useDashboardFilters();
+
+  const thresholdedAlerts = useMemo(
+    () => data.alerts.map((alert) => applyAlertThresholds(alert, settings)),
+    [data.alerts, settings]
+  );
+
+  const {
+    alerts,
+    selectedAlertId,
+    setSelectedAlertId,
+    selectedAlert,
+    selectedMlPrediction,
+    mlPredictionLoading,
+    mlPredictionError,
+    handleStatusChange,
+  } = useDashboardSelection(thresholdedAlerts);
+
+  const filteredAlerts = useMemo(() => filterAlerts(alerts, filters), [alerts, filters]);
 
   const visibleAlerts = useMemo(
-    () => filteredAlerts.filter((alert) => alert.status !== "resolved"),
-    [filteredAlerts]
+    () => buildVisibleAlerts(filteredAlerts, settings),
+    [filteredAlerts, settings]
   );
 
-  const selectedAlert = useMemo(
-    () => alerts.find((alert) => alert.id === selectedAlertId) ?? null,
-    [alerts, selectedAlertId]
+  const mapVisibleAlerts = useMemo(
+    () => buildMapVisibleAlerts(visibleAlerts, selectedAlert),
+    [visibleAlerts, selectedAlert]
   );
-
-  useEffect(() => {
-    async function loadMlPrediction() {
-      if (!selectedAlert?.routeKey && !(selectedAlert?.originPort && selectedAlert?.destinationPort)) {
-        setSelectedMlPrediction(null);
-        setMlPredictionError(null);
-        return;
-      }
-
-      try {
-        setMlPredictionLoading(true);
-        setMlPredictionError(null);
-
-        const prediction = await getMlRoutePrediction({
-          routeKey: selectedAlert.routeKey,
-          originPort: selectedAlert.originPort,
-          destinationPort: selectedAlert.destinationPort,
-          weatherScore: selectedAlert.weatherRisk ?? 0,
-          newsScore: selectedAlert.newsScore ?? 0,
-          congestionScore: selectedAlert.congestionScore ?? 0,
-        });
-
-        setSelectedMlPrediction(prediction);
-      } catch (err) {
-        setSelectedMlPrediction(null);
-        setMlPredictionError(
-          err instanceof Error ? err.message : "Failed to load ML prediction"
-        );
-      } finally {
-        setMlPredictionLoading(false);
-      }
-    }
-
-    loadMlPrediction();
-  }, [
-    selectedAlert?.routeKey,
-    selectedAlert?.originPort,
-    selectedAlert?.destinationPort,
-    selectedAlert?.weatherRisk,
-    selectedAlert?.newsScore,
-    selectedAlert?.congestionScore,
-  ]);
-
-  const mapVisibleAlerts = useMemo(() => {
-    const mapCapable = visibleAlerts.filter((alert) => {
-      const [lng, lat] = alert.coordinates;
-      return Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0);
-    });
-
-    const deduped = dedupeHighestRiskPerAnchorPort(mapCapable);
-
-    if (selectedAlert) {
-      const key = `${selectedAlert.anchorPort ?? selectedAlert.destinationPort ?? selectedAlert.location}|${selectedAlert.country}`;
-      const filtered = deduped.filter(
-        (a) =>
-          `${a.anchorPort ?? a.destinationPort ?? a.location}|${a.country}` !== key
-      );
-
-      const [lng, lat] = selectedAlert.coordinates;
-      if (Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0)) {
-        return [...filtered, selectedAlert];
-      }
-
-      return filtered;
-    }
-
-    return deduped;
-  }, [visibleAlerts, selectedAlert]);
 
   const notificationAlerts = useMemo(
-    () => alerts.filter((alert) => alert.status === "active"),
-    [alerts]
+    () => buildNotificationAlerts(alerts, settings),
+    [alerts, settings]
   );
 
-  async function handleStatusChange(id: string, newStatus: "acknowledged" | "resolved") {
-    try {
-      await updateAlertStatus(id, newStatus);
-
-      setAlerts((prev) =>
-        prev.map((alert) => (alert.id === id ? { ...alert, status: newStatus } : alert))
-      );
-    } catch (err) {
-      console.error("Failed to update alert status:", err);
-    }
-  }
+  const kpis = useMemo(
+    () =>
+      buildDashboardKpisFromApi({
+        dashboardOverview: data.dashboardOverview,
+        alertSummary: data.alertSummary,
+      }),
+    [data.dashboardOverview, data.alertSummary]
+  );
 
   const isRailOpen = !!selectedAlert;
 
-  if (isLoading) {
+  if (data.isLoading) {
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         <div className="relative z-50 shrink-0 border-b border-slate-800/80">
@@ -429,6 +129,7 @@ export default function DashboardPage() {
             onSelectNotification={(alert) => setSelectedAlertId(alert.id)}
           />
         </div>
+
         <div className="relative z-0 min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
           <div className="text-slate-400">Loading dashboard...</div>
         </div>
@@ -436,7 +137,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
+  if (data.error) {
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         <div className="relative z-50 shrink-0 border-b border-slate-800/80">
@@ -451,8 +152,9 @@ export default function DashboardPage() {
             onSelectNotification={(alert) => setSelectedAlertId(alert.id)}
           />
         </div>
+
         <div className="relative z-0 min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
-          <div className="text-rose-400">{error}</div>
+          <div className="text-rose-400">{data.error}</div>
         </div>
       </div>
     );
@@ -483,7 +185,7 @@ export default function DashboardPage() {
             businessUnit={businessUnit}
             onBusinessUnitChange={setBusinessUnit}
             riskLevel={riskLevel}
-            onRiskLevelChange={setRiskLevel}
+            onRiskLevelChange={handleRiskLevelChange}
           />
 
           <KpiGrid kpis={kpis} />
@@ -505,9 +207,9 @@ export default function DashboardPage() {
                 onLevelChange={setActiveLevel}
                 onAcknowledge={(id) => handleStatusChange(id, "acknowledged")}
                 onResolve={(id) => handleStatusChange(id, "resolved")}
-                emergingSignals={emergingSignals}
-                emergingSignalsLoading={emergingSignalsLoading}
-                emergingSignalsError={emergingSignalsError}
+                emergingSignals={data.emergingSignals}
+                emergingSignalsLoading={data.emergingSignalsLoading}
+                emergingSignalsError={data.emergingSignalsError}
               />
             </motion.div>
 
@@ -519,18 +221,16 @@ export default function DashboardPage() {
                   animate={{ width: 340, opacity: 1 }}
                   exit={{ width: 0, opacity: 0 }}
                   transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
-                  className="shrink-0 overflow-hidden"
+                  className="min-w-0 shrink-0 overflow-hidden"
                 >
-                  <div className="w-[340px]">
-                    <RightRail
-                      selectedAlert={selectedAlert}
-                      isOpen={isRailOpen}
-                      onClose={() => setSelectedAlertId(null)}
-                      mlPrediction={selectedMlPrediction}
-                      mlPredictionLoading={mlPredictionLoading}
-                      mlPredictionError={mlPredictionError}
-                    />
-                  </div>
+                  <RightRail
+                    selectedAlert={selectedAlert}
+                    isOpen={isRailOpen}
+                    onClose={() => setSelectedAlertId(null)}
+                    mlPrediction={selectedMlPrediction}
+                    mlPredictionLoading={mlPredictionLoading}
+                    mlPredictionError={mlPredictionError}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -548,19 +248,25 @@ export default function DashboardPage() {
               onLevelChange={setActiveLevel}
               onAcknowledge={(id) => handleStatusChange(id, "acknowledged")}
               onResolve={(id) => handleStatusChange(id, "resolved")}
-              emergingSignals={emergingSignals}
-              emergingSignalsLoading={emergingSignalsLoading}
-              emergingSignalsError={emergingSignalsError}
+              emergingSignals={data.emergingSignals}
+              emergingSignalsLoading={data.emergingSignalsLoading}
+              emergingSignalsError={data.emergingSignalsError}
             />
           </div>
 
-          <MidCardsSection
-            supplierExposureData={supplierExposureData}
-            lanePressureData={lanePressureData}
-            forecastData={forecastData}
-            analyticsOverview={analyticsOverview}
-            isLoading={midIsLoading}
-          />
+          {data.midError ? (
+            <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-300">
+              {data.midError}
+            </div>
+          ) : (
+            <MidCardsSection
+              supplierExposureData={data.supplierExposureData}
+              lanePressureData={data.lanePressureData}
+              forecastData={data.forecastData}
+              analyticsOverview={data.analyticsOverview}
+              isLoading={data.midLoading}
+            />
+          )}
 
           <BottomSection selectedAlertId={selectedAlertId} />
         </section>

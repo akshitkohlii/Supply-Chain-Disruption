@@ -37,8 +37,8 @@ export default function MiniStat({
   const barColor = getRiskBarColor(value, tone);
 
   return (
-    <div className="flex h-[90px] flex-col rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2">
-      <div className="line-clamp-2 min-h-[28px] text-[12px] leading-4 text-white">
+    <div className="flex h-22.5 flex-col rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2">
+      <div className="line-clamp-2 min-h-7 text-[12px] leading-4 text-white">
         {label}
       </div>
 

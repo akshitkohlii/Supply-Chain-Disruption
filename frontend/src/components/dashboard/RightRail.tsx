@@ -136,10 +136,13 @@ export default function RightRail({
   const drivers = buildDrivers(selectedAlert);
   const riskScore = buildRiskScore(selectedAlert);
   const confidence = buildConfidence(selectedAlert);
+  const isRouteAlert = selectedAlert.entityType !== "port";
+  const metadataTitle = isRouteAlert ? "Route Metadata" : "Port Metadata";
 
   const effectiveMlPrediction = mlPrediction
     ? mlPrediction
-    : selectedAlert.mlRiskScore != null || selectedAlert.mlProbability != null
+    : isRouteAlert &&
+      (selectedAlert.mlRiskScore != null || selectedAlert.mlProbability != null)
       ? {
           route_key: selectedAlert.routeKey ?? "",
           disruption_probability: selectedAlert.mlProbability ?? 0,
@@ -166,8 +169,8 @@ export default function RightRail({
           transition={{ duration: 0.22, ease: "easeOut" }}
           className="sticky top-4"
         >
-          <div className="relative h-[39.25rem] overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl">
-            <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${levelUI.accent}`} />
+          <div className="relative h-157 overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl">
+            <div className={`pointer-events-none absolute inset-0 bg-linear-to-br ${levelUI.accent}`} />
 
             <div className="relative flex h-full flex-col">
               <div className="shrink-0 border-b border-slate-800/80 px-5 py-4">
@@ -238,7 +241,7 @@ export default function RightRail({
 
                   <section className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      Route Metadata
+                      {metadataTitle}
                     </div>
 
                     <div className="mt-4 space-y-3 text-xs text-slate-300">
@@ -252,34 +255,69 @@ export default function RightRail({
                         <span className="font-medium capitalize text-white">{selectedAlert.status}</span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-slate-500">Route Key</span>
-                        <span className="font-medium text-right text-white">{selectedAlert.routeKey ?? "N/A"}</span>
-                      </div>
+                      {isRouteAlert ? (
+                        <>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Route Key</span>
+                            <span className="font-medium text-right text-white">
+                              {selectedAlert.routeKey ?? "N/A"}
+                            </span>
+                          </div>
 
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-slate-500">Origin Port</span>
-                        <span className="font-medium text-white">{selectedAlert.originPort ?? "N/A"}</span>
-                      </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Origin Port</span>
+                            <span className="font-medium text-white">
+                              {selectedAlert.originPort ?? "N/A"}
+                            </span>
+                          </div>
 
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-slate-500">Destination Port</span>
-                        <span className="font-medium text-white">{selectedAlert.destinationPort ?? "N/A"}</span>
-                      </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Destination Port</span>
+                            <span className="font-medium text-white">
+                              {selectedAlert.destinationPort ?? "N/A"}
+                            </span>
+                          </div>
 
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-slate-500">Anchor Port</span>
-                        <span className="font-medium text-white">{selectedAlert.anchorPort ?? "N/A"}</span>
-                      </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Anchor Port</span>
+                            <span className="font-medium text-white">{selectedAlert.anchorPort ?? "N/A"}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Origin Port</span>
+                            <span className="font-medium text-white">
+                              {selectedAlert.relatedOriginPort ?? "N/A"}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Destination Port</span>
+                            <span className="font-medium text-white">
+                              {selectedAlert.relatedDestinationPort ?? selectedAlert.destinationPort ?? "N/A"}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Shipment Id</span>
+                            <span className="font-medium text-right text-white break-all">
+                              {selectedAlert.shipmentId ?? "N/A"}
+                            </span>
+                          </div>
+                        </>
+                      )}
 
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-slate-500">Region</span>
                         <span className="font-medium text-white">{selectedAlert.region ?? "Unknown"}</span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-start justify-between gap-3">
                         <span className="text-slate-500">Timestamp</span>
-                        <span className="font-medium text-white">{selectedAlert.timestamp}</span>
+                        <span className="max-w-[65%] text-right font-medium text-white break-all">
+                          {selectedAlert.timestamp}
+                        </span>
                       </div>
                     </div>
                   </section>
@@ -499,9 +537,13 @@ export default function RightRail({
                           )}
                         </div>
                       </div>
-                    ) : (
+                    ) : isRouteAlert ? (
                       <div className="mt-4 text-xs text-slate-400">
                         No ML prediction available for this route.
+                      </div>
+                    ) : (
+                      <div className="mt-4 text-xs text-slate-400">
+                        ML outlook is available only for route-backed alerts. Port alerts use the signal-based risk breakdown above.
                       </div>
                     )}
                   </section>

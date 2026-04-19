@@ -18,6 +18,19 @@ function getLevelDot(level: AlertItem["level"]) {
   return "bg-cyan-400";
 }
 
+function formatFeedDate(timestamp: string) {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) {
+    return timestamp;
+  }
+
+  return parsed.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function AlertRow({
   alert,
   active,
@@ -56,7 +69,7 @@ export default function AlertRow({
 
         <div className="flex shrink-0 flex-col items-end gap-2">
           <span className="whitespace-nowrap text-[11px] text-slate-500">
-            {alert.timestamp}
+            {formatFeedDate(alert.timestamp)}
           </span>
 
           {alert.status === "active" && (

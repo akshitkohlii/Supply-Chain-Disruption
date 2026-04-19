@@ -1,145 +1,368 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import PageShell from "@/components/dashboard/PageShell";
 import PageHeader from "@/components/dashboard/PageHeader";
 import PageSection from "@/components/dashboard/PageSection";
 import Panel from "@/components/dashboard/Panel";
 import {
-  alerts,
-  predictiveRiskData,
-  supplierRiskData,
-  logisticsTransportData,
-} from "@/lib/dashboard-data";
+  getAnalyticsOverview,
+  getAnalyticsTimeSeries,
+  getLanePressure,
+  getSupplierExposure,
+  type ApiAnalyticsOverview,
+  type ApiAnalyticsTimeSeriesPoint,
+  type ApiLanePressureItem,
+  type ApiSupplierExposureItem,
+} from "@/lib/api";
 
 type FocusMode = "all" | "forecast" | "suppliers" | "logistics";
 
 export default function AnalyticsPage() {
   const [focusMode, setFocusMode] = useState<FocusMode>("all");
+  const [selectedPort, setSelectedPort] = useState("");
+  const [selectedLane, setSelectedLane] = useState("");
+  const [overview, setOverview] = useState<ApiAnalyticsOverview | null>(null);
+  const [timeSeries, setTimeSeries] = useState<ApiAnalyticsTimeSeriesPoint[]>([]);
+  const [supplierExposure, setSupplierExposure] = useState<ApiSupplierExposureItem[]>([]);
+  const [lanePressure, setLanePressure] = useState<ApiLanePressureItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const avgForecast = Math.round(
-    predictiveRiskData.reduce((sum, item) => sum + item.forecast, 0) /
-      predictiveRiskData.length
-  );
+  useEffect(() => {
+    let cancelled = false;
 
-  const avgCurrent = Math.round(
-    predictiveRiskData.reduce((sum, item) => sum + item.current, 0) /
-      predictiveRiskData.length
-  );
+    async function loadAnalytics() {
+      setIsLoading(true);
+      setError(null);
 
-  const forecastDrift = avgForecast - avgCurrent;
+      try {
+        const [overviewData, timeSeriesData, supplierData, laneData] = await Promise.all([
+          getAnalyticsOverview(),
+          getAnalyticsTimeSeries({
+            port: selectedPort || undefined,
+            lane: selectedLane || undefined,
+          }),
+          getSupplierExposure(),
+          getLanePressure(),
+        ]);
 
-  const avgSupplierRisk = Math.round(
-    supplierRiskData.reduce((sum, item) => sum + item.risk, 0) /
-      supplierRiskData.length
-  );
+        if (cancelled) return;
 
-  const avgDelay = Math.round(
-    logisticsTransportData.reduce((sum, item) => sum + item.delay, 0) /
-      logisticsTransportData.length
-  );
+        setOverview(overviewData);
+        setTimeSeries(timeSeriesData);
+        setSupplierExposure(supplierData);
+        setLanePressure(laneData);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load analytics.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
 
-  const criticalAlerts = alerts.filter((a) => a.level === "critical").length;
+    loadAnalytics();
 
-  const forecastRows = useMemo(() => {
-    return predictiveRiskData.map((item) => ({
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLane, selectedPort]);
+
+  const avgForecast = Math.round(overview?.avg_forecast_risk ?? 0);
+  const forecastDrift = Number((overview?.forecast_drift ?? 0).toFixed(1));
+  const avgSupplierRisk = Math.round(overview?.avg_supplier_risk ?? 0);
+  const avgDelay = Math.round(overview?.avg_delay_hours ?? 0);
+  const criticalAlerts = overview?.critical_alerts ?? 0;
+
+  const timeSeriesRows = useMemo(() => {
+    return timeSeries.map((item) => ({
       ...item,
-      drift: item.forecast - item.current,
+      currentRisk: Number(item.current_risk.toFixed(1)),
+      forecastRisk: Number(item.forecast_risk.toFixed(1)),
+      weatherScore: Number(item.weather_score.toFixed(1)),
+      newsScore: Number(item.news_score.toFixed(1)),
+      congestionScore: Number(item.congestion_score.toFixed(1)),
+      logisticsScore: Number(item.logistics_score.toFixed(1)),
+      emergingScore: Number(item.emerging_score.toFixed(1)),
+      driftValue: Number(item.drift.toFixed(1)),
+      label: `${item.day} ${item.date.slice(5)}`,
     }));
-  }, []);
+  }, [timeSeries]);
 
   const supplierExposureRows = useMemo(() => {
-    return supplierRiskData
+    return supplierExposure
       .map((item) => ({
         ...item,
-        combined: Math.round((item.risk + item.dependency) / 2),
+        combined: Math.round((item.risk_score + item.dependency_score) / 2),
       }))
       .sort((a, b) => b.combined - a.combined)
       .slice(0, 6);
-  }, []);
+  }, [supplierExposure]);
 
   const logisticsRows = useMemo(() => {
-    return logisticsTransportData
+    return lanePressure
       .map((item) => ({
         ...item,
-        pressure: Math.round((item.delay * 1.2 + (100 - item.throughput)) / 2),
+        label: `${item.origin_port}-${item.destination_port}`,
       }))
-      .sort((a, b) => b.pressure - a.pressure);
-  }, []);
+      .sort((a, b) => b.pressure_score - a.pressure_score)
+      .slice(0, 6);
+  }, [lanePressure]);
+
+  const portOptions = useMemo(() => {
+    const ports = new Set<string>();
+    lanePressure.forEach((item) => {
+      if (item.origin_port) ports.add(item.origin_port);
+      if (item.destination_port) ports.add(item.destination_port);
+    });
+    return Array.from(ports).sort((a, b) => a.localeCompare(b));
+  }, [lanePressure]);
+
+  const laneOptions = useMemo(() => {
+    return lanePressure
+      .map((item) => ({
+        label: `${item.origin_port} → ${item.destination_port}`,
+        value: item.lane,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [lanePressure]);
+
+  const driverPeaks = useMemo(() => {
+    if (!timeSeriesRows.length) {
+      return [
+        { label: "Weather", value: 0, tone: "low" as const },
+        { label: "News", value: 0, tone: "low" as const },
+        { label: "Congestion", value: 0, tone: "low" as const },
+      ];
+    }
+
+    const maxWeather = Math.max(...timeSeriesRows.map((item) => item.weatherScore));
+    const maxNews = Math.max(...timeSeriesRows.map((item) => item.newsScore));
+    const maxCongestion = Math.max(...timeSeriesRows.map((item) => item.congestionScore));
+
+    return [
+      { label: "Weather Peak", value: maxWeather, tone: getTone(maxWeather) },
+      { label: "News Peak", value: maxNews, tone: getTone(maxNews) },
+      { label: "Congestion Peak", value: maxCongestion, tone: getTone(maxCongestion) },
+    ];
+  }, [timeSeriesRows]);
 
   return (
     <PageShell
       header={
         <PageHeader
           title="Analytics"
-          description="Track forecast drift, supplier exposure, and logistics pressure across the control tower."
+          description="Track live risk time series, supplier exposure, and logistics pressure from current route snapshots."
         />
       }
     >
       <PageSection>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <AnalyticsKpiCard
-            title="Avg Forecast Risk"
+            title="Average Modeled Route Risk"
             value={`${avgForecast}`}
-            subtitle="Predictive model output"
-            tone={avgForecast >= 70 ? "high" : avgForecast >= 50 ? "medium" : "low"}
+            subtitle="Latest modeled route risk"
+            tone={getTone(avgForecast)}
           />
           <AnalyticsKpiCard
-            title="Forecast Drift"
+            title="Model vs Observed Drift"
             value={`${forecastDrift > 0 ? "+" : ""}${forecastDrift}`}
-            subtitle="Forecast vs current"
-            tone={forecastDrift >= 12 ? "high" : forecastDrift >= 5 ? "medium" : "low"}
+            subtitle="Modeled vs observed"
+            tone={getTone(Math.abs(forecastDrift) * 6)}
           />
           <AnalyticsKpiCard
-            title="Avg Supplier Risk"
+            title="Average Supplier Exposure"
             value={`${avgSupplierRisk}`}
-            subtitle="Supplier base exposure"
-            tone={
-              avgSupplierRisk >= 70 ? "high" : avgSupplierRisk >= 50 ? "medium" : "low"
-            }
+            subtitle="Supplier exposure baseline"
+            tone={getTone(avgSupplierRisk)}
           />
           <AnalyticsKpiCard
-            title="Critical Alerts"
+            title="Critical Route Snapshots"
             value={`${criticalAlerts}`}
-            subtitle={`${avgDelay}h avg logistics delay`}
-            tone={criticalAlerts >= 2 ? "high" : criticalAlerts >= 1 ? "medium" : "low"}
+            subtitle={`${avgDelay}h avg route delay`}
+            tone={getTone(criticalAlerts * 25)}
           />
         </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-          <Panel title="Forecast Trend Grid" className="xl:col-span-7">
-            <div className="overflow-hidden rounded-xl border border-slate-800/70">
-              <div className="grid grid-cols-[0.8fr_1fr_1fr_1fr] gap-x-6 bg-slate-950/70 px-5 py-3 text-xs uppercase tracking-[0.18em] text-slate-500">
-                <div>Week</div>
-                <div>Current</div>
-                <div>Forecast</div>
-                <div>Drift</div>
-              </div>
+          <Panel title="Risk Snapshot Time Series" className="xl:col-span-8">
+            {isLoading ? (
+              <AnalyticsEmptyState message="Loading time-series analysis..." />
+            ) : error ? (
+              <AnalyticsEmptyState message={error} isError />
+            ) : !timeSeriesRows.length ? (
+              <AnalyticsEmptyState message="No time-series data available yet." />
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
+                  <label className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-3">
+                    <div className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                      Filter By Port
+                    </div>
+                    <select
+                      value={selectedPort}
+                      onChange={(event) => {
+                        setSelectedPort(event.target.value);
+                        if (selectedLane) setSelectedLane("");
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-200 outline-none transition focus:border-slate-600"
+                    >
+                      <option value="">All ports</option>
+                      {portOptions.map((port) => (
+                        <option key={port} value={port}>
+                          {port}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              <div className="divide-y divide-slate-800/70">
-                {forecastRows.map((item) => (
-                  <div
-                    key={item.week}
-                    className={`grid grid-cols-[0.8fr_1fr_1fr_1fr] items-center gap-x-6 px-5 py-4 text-sm transition hover:bg-slate-900/40 ${
-                      focusMode === "forecast" || focusMode === "all" ? "opacity-100" : "opacity-50"
-                    }`}
+                  <label className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-3">
+                    <div className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                      Filter By Lane
+                    </div>
+                    <select
+                      value={selectedLane}
+                      onChange={(event) => {
+                        setSelectedLane(event.target.value);
+                        if (selectedPort) setSelectedPort("");
+                      }}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-200 outline-none transition focus:border-slate-600"
+                    >
+                      <option value="">All lanes</option>
+                      {laneOptions.map((lane) => (
+                        <option key={lane.value} value={lane.value}>
+                          {lane.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPort("");
+                      setSelectedLane("");
+                    }}
+                    className="rounded-2xl border border-slate-800/80 bg-slate-950/45 px-4 py-3 text-sm text-slate-300 transition hover:border-slate-700 hover:text-white"
                   >
-                    <div className="font-medium text-white">{item.week}</div>
-                    <MetricBar value={item.current} max={100} mode="neutral" />
-                    <MetricBar value={item.forecast} max={100} mode="forecast" />
-                    <DriftBadge value={item.drift} />
+                    Reset Filters
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  {driverPeaks.map((item) => (
+                    <FocusCard
+                      key={item.label}
+                      title={item.label}
+                      value={`${item.value.toFixed(1)}`}
+                      subtitle="Highest daily average in the current window"
+                      active={false}
+                      tone={item.tone}
+                      onClick={() => {}}
+                    />
+                  ))}
+                </div>
+
+                <div className="h-[340px] rounded-2xl border border-slate-800/70 bg-slate-950/55 p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={timeSeriesRows} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="riskSeriesFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid vertical={false} stroke="rgba(148,163,184,0.08)" />
+                      <XAxis dataKey="day" tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} axisLine={false} width={34} />
+                      <Tooltip
+                        contentStyle={{
+                          background: "rgba(2,6,23,0.96)",
+                          border: "1px solid rgba(30,41,59,0.95)",
+                          borderRadius: 16,
+                          color: "#e2e8f0",
+                        }}
+                      />
+                      <Area type="monotone" dataKey="currentRisk" stroke="#38bdf8" strokeWidth={2} fill="url(#riskSeriesFill)" />
+                      <Line type="monotone" dataKey="forecastRisk" stroke="#f97316" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="weatherScore" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
+                      <Line type="monotone" dataKey="newsScore" stroke="#facc15" strokeWidth={1.5} dot={false} />
+                      <Line type="monotone" dataKey="congestionScore" stroke="#22d3ee" strokeWidth={1.5} dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                      Driver Mix
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {[
+                        { label: "Weather", value: latestValue(timeSeriesRows, "weatherScore") },
+                        { label: "News", value: latestValue(timeSeriesRows, "newsScore") },
+                        { label: "Congestion", value: latestValue(timeSeriesRows, "congestionScore") },
+                        { label: "Logistics", value: latestValue(timeSeriesRows, "logisticsScore") },
+                        { label: "Emerging", value: latestValue(timeSeriesRows, "emergingScore") },
+                      ].map((item) => (
+                        <MiniMetric key={item.label} label={item.label} value={`${item.value.toFixed(1)}`} raw={item.value} />
+                      ))}
+                    </div>
                   </div>
-                ))}
+
+                  <div className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                      Daily Analysis Table
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {timeSeriesRows.slice(-5).reverse().map((item) => (
+                        <div
+                          key={item.date}
+                          className="rounded-xl border border-slate-800/70 bg-slate-950/55 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium text-white">{item.label}</div>
+                              <div className="text-xs text-slate-500">{item.route_count} active routes sampled</div>
+                            </div>
+                            <DriftBadge value={item.driftValue} />
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                            <div>Current: <span className="text-slate-200">{item.currentRisk}</span></div>
+                            <div>Forecast: <span className="text-slate-200">{item.forecastRisk}</span></div>
+                            <div>Weather: <span className="text-slate-200">{item.weatherScore}</span></div>
+                            <div>News: <span className="text-slate-200">{item.newsScore}</span></div>
+                            <div>Congestion: <span className="text-slate-200">{item.congestionScore}</span></div>
+                            <div>Emerging: <span className="text-slate-200">{item.emergingScore}</span></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </Panel>
 
-          <Panel title="Analytics Focus" className="xl:col-span-5">
+          <Panel title="Analysis Focus Controls" className="xl:col-span-4">
             <div className="space-y-3">
               <FocusCard
                 title="Forecast Signals"
                 value={`${avgForecast}`}
-                subtitle="Projected multi-week movement"
+                subtitle="Observed vs modeled route movement"
                 active={focusMode === "forecast"}
                 tone="high"
                 onClick={() =>
@@ -149,7 +372,7 @@ export default function AnalyticsPage() {
               <FocusCard
                 title="Supplier Exposure"
                 value={`${avgSupplierRisk}`}
-                subtitle="Risk + dependency concentration"
+                subtitle="Risk and dependency concentration"
                 active={focusMode === "suppliers"}
                 tone="medium"
                 onClick={() =>
@@ -159,7 +382,7 @@ export default function AnalyticsPage() {
               <FocusCard
                 title="Logistics Pressure"
                 value={`${avgDelay}h`}
-                subtitle="Transport execution strain"
+                subtitle="Lane delay and throughput strain"
                 active={focusMode === "logistics"}
                 tone="low"
                 onClick={() =>
@@ -177,7 +400,11 @@ export default function AnalyticsPage() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => setFocusMode("all")}
+                    onClick={() => {
+                      setFocusMode("all");
+                      setSelectedPort("");
+                      setSelectedLane("");
+                    }}
                     className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-700 hover:text-white"
                   >
                     Reset
@@ -189,15 +416,15 @@ export default function AnalyticsPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-          <Panel title="Top Supplier Exposure" className="xl:col-span-6">
+          <Panel title="Highest Supplier Exposure" className="xl:col-span-6">
             <div className="space-y-3">
               {supplierExposureRows.map((item) => (
                 <InsightMetricRow
-                  key={item.supplier}
-                  label={`Supplier ${item.supplier}`}
+                  key={item.supplier_id}
+                  label={item.supplier_name}
                   value={`${item.combined}`}
-                  leftValue={item.risk}
-                  rightValue={item.dependency}
+                  leftValue={item.risk_score}
+                  rightValue={item.dependency_score}
                   leftLabel="Risk"
                   rightLabel="Dependency"
                   dimmed={focusMode !== "all" && focusMode !== "suppliers"}
@@ -206,15 +433,15 @@ export default function AnalyticsPage() {
             </div>
           </Panel>
 
-          <Panel title="Lane Pressure Snapshot" className="xl:col-span-6">
+          <Panel title="Top Lane Pressure Snapshot" className="xl:col-span-6">
             <div className="space-y-3">
               {logisticsRows.map((item) => (
                 <InsightMetricRow
-                  key={item.day}
-                  label={item.day}
-                  value={`${item.pressure}`}
-                  leftValue={item.delay}
-                  rightValue={item.throughput}
+                  key={item.lane}
+                  label={item.label}
+                  value={`${Math.round(item.pressure_score)}`}
+                  leftValue={item.delay_hours}
+                  rightValue={item.throughput_pct}
                   leftLabel="Delay"
                   rightLabel="Throughput"
                   leftSuffix="h"
@@ -227,6 +454,35 @@ export default function AnalyticsPage() {
         </div>
       </PageSection>
     </PageShell>
+  );
+}
+
+function getTone(value: number): "high" | "medium" | "low" {
+  if (value >= 70) return "high";
+  if (value >= 40) return "medium";
+  return "low";
+}
+
+function latestValue(
+  items: Array<Record<string, number | string>>,
+  key: string
+) {
+  const last = items[items.length - 1];
+  if (!last) return 0;
+  return Number(last[key] ?? 0);
+}
+
+function AnalyticsEmptyState({
+  message,
+  isError = false,
+}: {
+  message: string;
+  isError?: boolean;
+}) {
+  return (
+    <div className={`flex min-h-[220px] items-center justify-center text-sm ${isError ? "text-rose-300" : "text-slate-400"}`}>
+      {message}
+    </div>
   );
 }
 
@@ -268,12 +524,9 @@ function AnalyticsKpiCard({
       <div className={`pointer-events-none absolute inset-0 bg-linear-to-r ${ui.bg}`} />
       <div className="relative">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-            {title}
-          </div>
+          <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{title}</div>
           <span className={`h-2.5 w-2.5 rounded-full ${ui.dot}`} />
         </div>
-
         <div className="mt-3 text-2xl font-semibold text-white">{value}</div>
         <div className={`mt-1 text-sm ${ui.text}`}>{subtitle}</div>
       </div>
@@ -319,37 +572,6 @@ function FocusCard({
       </div>
       <div className="mt-2 text-xs text-slate-400">{subtitle}</div>
     </button>
-  );
-}
-
-function MetricBar({
-  value,
-  max,
-  mode,
-}: {
-  value: number;
-  max: number;
-  mode: "forecast" | "neutral";
-}) {
-  const width = Math.min((value / max) * 100, 100);
-  const tone =
-    mode === "forecast"
-      ? value >= 70
-        ? "bg-rose-400"
-        : value >= 50
-        ? "bg-amber-400"
-        : "bg-cyan-400"
-      : "bg-slate-300";
-
-  return (
-    <div className="flex items-center gap-3">
-      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800/80">
-        <div className={`h-full ${tone}`} style={{ width: `${width}%` }} />
-      </div>
-      <span className="min-w-10 text-right font-medium text-slate-200">
-        {value}
-      </span>
-    </div>
   );
 }
 

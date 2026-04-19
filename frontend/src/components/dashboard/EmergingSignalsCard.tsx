@@ -56,7 +56,7 @@ export default function EmergingSignalsCard({
   return (
     <Panel
       title="Emerging Risk Signals"
-      className="h-[320px]"
+      className="h-80"
       bodyClassName="h-full overflow-hidden"
     >
       <div className="flex h-full flex-col">

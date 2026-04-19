@@ -1,6 +1,7 @@
 "use client";
 
 import { Search } from "lucide-react";
+import { REGION_OPTIONS } from "@/lib/settings";
 import GlassBox from "./GlassBox";
 import FilterBox from "./ui/FilterBox";
 
@@ -41,13 +42,7 @@ export default function SearchFilters({
       <FilterBox
         label="Region"
         value={region}
-        options={[
-          "All Regions",
-          "Asia",
-          "Europe",
-          "North America",
-          "South America",
-        ]}
+        options={[...REGION_OPTIONS]}
         onChange={onRegionChange}
       />
 

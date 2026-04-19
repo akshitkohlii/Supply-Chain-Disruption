@@ -1,4 +1,6 @@
-from app.core.database import db
+from typing import Any, Dict, List
+
+from app.core.database import get_database
 
 
 DAY_NAME_MAP = {
@@ -22,14 +24,25 @@ DAY_ORDER = {
 }
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 async def get_logistics_overview():
+    db = get_database()
+
     pipeline = [
         {
             "$group": {
                 "_id": None,
-                "avg_delay_hours": {"$avg": "$delay_hours"},
-                "avg_expected_time": {"$avg": "$expected_time_hours"},
-                "avg_actual_time": {"$avg": "$actual_time_hours"},
+                "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
+                "avg_expected_time": {"$avg": {"$ifNull": ["$expected_time_hours", 0]}},
+                "avg_actual_time": {"$avg": {"$ifNull": ["$actual_time_hours", 0]}},
                 "total_shipments": {"$sum": 1},
             }
         }
@@ -50,9 +63,9 @@ async def get_logistics_overview():
 
     data = result[0]
 
-    avg_delay = round(data["avg_delay_hours"], 2)
-    avg_expected = round(data["avg_expected_time"], 2)
-    avg_actual = round(data["avg_actual_time"], 2)
+    avg_delay = round(_safe_float(data.get("avg_delay_hours")), 2)
+    avg_expected = round(_safe_float(data.get("avg_expected_time")), 2)
+    avg_actual = round(_safe_float(data.get("avg_actual_time")), 2)
 
     avg_throughput_pct = round(
         max(0, min(100, 100 - ((avg_delay / avg_expected) * 100))) if avg_expected > 0 else 0,
@@ -62,24 +75,35 @@ async def get_logistics_overview():
     peak_day_pipeline = [
         {
             "$addFields": {
-                "parsed_date": {"$dateFromString": {"dateString": "$date"}}
+                "parsed_timestamp": {
+                    "$dateFromString": {
+                        "dateString": "$timestamp",
+                        "onError": None,
+                        "onNull": None,
+                    }
+                }
+            }
+        },
+        {
+            "$match": {
+                "parsed_timestamp": {"$ne": None},
             }
         },
         {
             "$group": {
-                "_id": {"$dayOfWeek": "$parsed_date"},
-                "avg_delay": {"$avg": "$delay_hours"}
+                "_id": {"$dayOfWeek": "$parsed_timestamp"},
+                "avg_delay": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
             }
         },
         {"$sort": {"avg_delay": -1}},
-        {"$limit": 1}
+        {"$limit": 1},
     ]
 
     peak_day_result = await db.shipments_raw.aggregate(peak_day_pipeline).to_list(1)
     peak_delay_day = (
         {
             "day": DAY_NAME_MAP.get(peak_day_result[0]["_id"], "Unknown"),
-            "avg_delay_hours": round(peak_day_result[0]["avg_delay"], 2),
+            "avg_delay_hours": round(_safe_float(peak_day_result[0].get("avg_delay")), 2),
         }
         if peak_day_result
         else None
@@ -90,7 +114,7 @@ async def get_logistics_overview():
     high = await db.shipments_raw.count_documents({"delay_hours": {"$gt": 20}})
 
     return {
-        "total_shipments": data["total_shipments"],
+        "total_shipments": int(data.get("total_shipments") or 0),
         "avg_delay_hours": avg_delay,
         "avg_expected_time_hours": avg_expected,
         "avg_actual_time_hours": avg_actual,
@@ -105,27 +129,40 @@ async def get_logistics_overview():
 
 
 async def get_logistics_timeseries():
+    db = get_database()
+
     pipeline = [
         {
             "$addFields": {
-                "parsed_date": {"$dateFromString": {"dateString": "$date"}}
+                "parsed_timestamp": {
+                    "$dateFromString": {
+                        "dateString": "$timestamp",
+                        "onError": None,
+                        "onNull": None,
+                    }
+                }
+            }
+        },
+        {
+            "$match": {
+                "parsed_timestamp": {"$ne": None},
             }
         },
         {
             "$group": {
-                "_id": {"$dayOfWeek": "$parsed_date"},
-                "avg_delay_hours": {"$avg": "$delay_hours"},
-                "avg_expected_time_hours": {"$avg": "$expected_time_hours"},
+                "_id": {"$dayOfWeek": "$parsed_timestamp"},
+                "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
+                "avg_expected_time_hours": {"$avg": {"$ifNull": ["$expected_time_hours", 0]}},
             }
-        }
+        },
     ]
 
     raw = await db.shipments_raw.aggregate(pipeline).to_list(None)
 
-    rows = []
+    rows: List[Dict[str, Any]] = []
     for item in raw:
-        avg_delay = round(item["avg_delay_hours"], 2)
-        avg_expected = round(item["avg_expected_time_hours"], 2)
+        avg_delay = round(_safe_float(item.get("avg_delay_hours")), 2)
+        avg_expected = round(_safe_float(item.get("avg_expected_time_hours")), 2)
         throughput = round(
             max(0, min(100, 100 - ((avg_delay / avg_expected) * 100))) if avg_expected > 0 else 0,
             2,
@@ -133,11 +170,13 @@ async def get_logistics_timeseries():
 
         day_name = DAY_NAME_MAP.get(item["_id"], "Unknown")
 
-        rows.append({
-            "day": day_name,
-            "avg_delay_hours": avg_delay,
-            "throughput_pct": throughput,
-        })
+        rows.append(
+            {
+                "day": day_name,
+                "avg_delay_hours": avg_delay,
+                "throughput_pct": throughput,
+            }
+        )
 
     rows.sort(key=lambda x: DAY_ORDER.get(x["day"], 99))
     return rows

@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 
 import Panel from "./Panel";
@@ -6,10 +7,17 @@ import LayerChip from "./ui/LayerChip";
 import Legend from "./ui/Legend";
 import AlertRow from "./ui/AlertRow";
 import MiniStat from "./ui/MiniStat";
-import WorldRiskMap from "./WorldriskMap";
-
 import type { ApiEmergingSignal } from "@/lib/api";
 import type { AlertItem } from "@/lib/mappers";
+
+const WorldRiskMap = dynamic(() => import("./WorldriskMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center rounded-2xl bg-slate-950/40 text-sm text-slate-400">
+      Loading map...
+    </div>
+  ),
+});
 
 type LayerFilter =
   | "all"
@@ -89,7 +97,7 @@ function MainMapSection({
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-      <Panel title="Global Disruption Risk Map" className="xl:col-span-8">
+      <Panel title="Global Network Risk Map" className="xl:col-span-8">
         <div className="flex h-130 flex-col gap-3 rounded-2xl border border-slate-800/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(9,14,25,0.95))] p-4">
           <div className="relative z-20 flex flex-wrap gap-2">
             <LayerChip
@@ -164,7 +172,7 @@ function MainMapSection({
 
       <div className="space-y-4 xl:col-span-4">
         <Panel
-          title="Live Alerts Feed"
+          title="Active Alerts Feed"
           action={
             <div className="flex h-5 items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2 text-[10px] font-medium text-cyan-300">
               {orderedAlerts.length} Alerts
@@ -202,7 +210,7 @@ function MainMapSection({
         </Panel>
 
         <Panel
-          title="Emerging Risk Signals"
+          title="Live Emerging Signals"
           className="h-70"
           bodyClassName="h-full px-3 py-5"
         >

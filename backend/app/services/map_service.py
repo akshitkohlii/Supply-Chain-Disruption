@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 
 from app.core.database import get_database
+from app.services.port_service import get_active_ports
 
 
 def _signal_level(weather_score: int, news_score: int) -> str:
@@ -15,16 +16,7 @@ def _signal_level(weather_score: int, news_score: int) -> str:
 async def get_map_points(limit: int = 500) -> List[Dict[str, Any]]:
     db = get_database()
 
-    ports = await db.ports_master.find(
-        {"active": {"$ne": False}},
-        {
-            "_id": 1,
-            "port_name": 1,
-            "country": 1,
-            "lat": 1,
-            "lng": 1,
-        },
-    ).to_list(length=5000)
+    ports = await get_active_ports()
 
     weather_docs = await db.weather_signals.find({}).sort("fetched_at", -1).to_list(length=5000)
     latest_weather: Dict[str, Dict[str, Any]] = {}
@@ -43,6 +35,8 @@ async def get_map_points(limit: int = 500) -> List[Dict[str, Any]]:
     points: List[Dict[str, Any]] = []
 
     for port in ports[:limit]:
+        if port.get("lat") is None or port.get("lng") is None:
+            continue
         entity_id = str(port.get("_id"))
         weather_doc = latest_weather.get(entity_id, {})
         news_doc = latest_news.get(entity_id, {})

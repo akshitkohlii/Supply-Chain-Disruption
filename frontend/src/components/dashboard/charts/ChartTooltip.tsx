@@ -1,8 +1,10 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 type TooltipEntry = {
   name?: string;
-  value?: number | string;
+  value?: number | string | Array<number | string>;
   color?: string;
   dataKey?: string;
   payload?: Record<string, unknown>;
@@ -13,10 +15,30 @@ type ChartTooltipProps = {
   payload?: TooltipEntry[];
   label?: string;
   labelPrefix?: string;
+  formatter?: (
+    value: TooltipEntry["value"],
+    name: TooltipEntry["name"],
+    entry: TooltipEntry
+  ) => [ReactNode, ReactNode] | ReactNode;
+  labelFormatter?: (
+    label: string | undefined,
+    payload?: TooltipEntry[]
+  ) => ReactNode;
+  extraContent?: (payload?: TooltipEntry[]) => ReactNode;
 };
 
-function formatValue(dataKey: string | undefined, value: number | string | undefined) {
-  const numericValue = Number(value ?? 0);
+function getNumericValue(value: TooltipEntry["value"]) {
+  if (Array.isArray(value)) {
+    return Number(value[0] ?? 0);
+  }
+  return Number(value ?? 0);
+}
+
+function formatValue(
+  dataKey: string | undefined,
+  value: TooltipEntry["value"]
+) {
+  const numericValue = getNumericValue(value);
 
   if (dataKey === "throughput") return `${numericValue.toFixed(1)}%`;
   if (dataKey === "avgDelay") return `${numericValue.toFixed(1)}h`;
@@ -52,37 +74,61 @@ export default function ChartTooltip({
   payload,
   label,
   labelPrefix,
+  formatter,
+  labelFormatter,
+  extraContent,
 }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
 
+  const resolvedLabel = labelFormatter ? labelFormatter(label, payload) : label;
+
   return (
-    <div className="min-w-[180px] rounded-xl border border-slate-800/80 bg-slate-950/95 px-3 py-2 shadow-xl">
-      {label ? (
-        <div className="mb-2 text-xs font-medium text-white">
-          {labelPrefix ? `${labelPrefix}: ${label}` : label}
+    <div className="min-w-[180px] rounded-2xl border border-slate-700/80 bg-slate-950/95 px-3 py-3 shadow-2xl backdrop-blur">
+      {resolvedLabel ? (
+        <div className="mb-2 border-b border-slate-800 pb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+          {labelPrefix ? `${labelPrefix}: ` : ""}
+          {resolvedLabel}
         </div>
       ) : null}
 
       <div className="space-y-1.5">
-        {payload.map((entry, index) => (
-          <div
-            key={`${entry.dataKey ?? entry.name ?? "row"}-${index}`}
-            className="flex items-center justify-between gap-4 text-xs"
-          >
-            <div className="flex items-center gap-2 text-slate-300">
-              <span
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: entry.color ?? "#94a3b8" }}
-              />
-              <span>{formatLabel(entry.name, entry.dataKey)}</span>
-            </div>
+        {payload.map((entry, index) => {
+          const customFormatted = formatter?.(entry.value, entry.name, entry);
 
-            <span className="font-medium text-white">
-              {formatValue(entry.dataKey, entry.value)}
-            </span>
-          </div>
-        ))}
+          let valueNode: ReactNode;
+          let labelNode: ReactNode;
+
+          if (Array.isArray(customFormatted)) {
+            valueNode = customFormatted[0];
+            labelNode = customFormatted[1];
+          } else if (customFormatted !== undefined) {
+            valueNode = customFormatted;
+            labelNode = formatLabel(entry.name, entry.dataKey);
+          } else {
+            valueNode = formatValue(entry.dataKey, entry.value);
+            labelNode = formatLabel(entry.name, entry.dataKey);
+          }
+
+          return (
+            <div
+              key={`${entry.dataKey ?? entry.name ?? "item"}-${index}`}
+              className="flex items-center justify-between gap-4 text-[12px]"
+            >
+              <div className="flex items-center gap-2 text-slate-300">
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: entry.color ?? "#94a3b8" }}
+                />
+                <span>{labelNode}</span>
+              </div>
+
+              <span className="font-medium text-white">{valueNode}</span>
+            </div>
+          );
+        })}
       </div>
+
+      {extraContent ? extraContent(payload) : null}
     </div>
   );
 }

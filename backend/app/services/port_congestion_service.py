@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from app.core.database import get_database
+from app.services.port_congestion_model_service import predict_port_congestion_forecast
+from app.services.port_service import get_port_by_name
 
 
 def clamp_score(value: float) -> int:
@@ -21,6 +23,8 @@ def normalize_metric(value: float, low: float, high: float) -> float:
 def build_port_congestion_signal_from_routes(
     port_name: str,
     route_rows: List[Dict[str, Any]],
+    weather_score: float = 0.0,
+    news_score: float = 0.0,
 ) -> Dict[str, Any]:
     shipment_count = sum(int(r.get("shipment_count") or 0) for r in route_rows)
 
@@ -53,13 +57,28 @@ def build_port_congestion_signal_from_routes(
         + 0.20 * customs_pressure
         + 0.20 * volatility_pressure
     )
+    forecast = predict_port_congestion_forecast(
+        shipment_count=shipment_count,
+        avg_delay_hours=avg_delay_hours,
+        avg_customs_clearance_hours=avg_customs_clearance_hours,
+        avg_demand_volatility=avg_demand_volatility,
+        weather_score=weather_score,
+        news_score=news_score,
+        current_congestion_score=congestion_score,
+    )
+    forecast_score = (
+        int(forecast["forecast_congestion_score"])
+        if forecast
+        else congestion_score
+    )
+    blended_score = clamp_score(congestion_score * 0.7 + forecast_score * 0.3)
 
     return {
         "entity_type": "port",
         "entity_id": port_name,
         "port_name": port_name,
         "signal_type": "port_congestion",
-        "severity": congestion_score,
+        "severity": blended_score,
         "confidence": 0.70,
         "features": {
             "shipment_count": shipment_count,
@@ -70,6 +89,11 @@ def build_port_congestion_signal_from_routes(
             "delay_pressure": round(delay_pressure, 2),
             "customs_pressure": round(customs_pressure, 2),
             "volatility_pressure": round(volatility_pressure, 2),
+            "weather_score": round(weather_score, 2),
+            "news_score": round(news_score, 2),
+            "current_congestion_score": congestion_score,
+            "forecast_congestion_score": forecast_score,
+            "forecast_horizon_days": int((forecast or {}).get("forecast_horizon_days") or 0),
         },
         "event_time": datetime.now(timezone.utc),
         "fetched_at": datetime.now(timezone.utc),
@@ -104,17 +128,45 @@ async def ingest_port_congestion_signals() -> Dict[str, Any]:
         if destination:
             grouped.setdefault(destination, []).append(route)
 
+    weather_docs = (
+        await db.weather_signals.find({"entity_type": "port"})
+        .sort("fetched_at", -1)
+        .to_list(length=5000)
+    )
+    news_docs = (
+        await db.news_signals.find({"entity_type": "port"})
+        .sort("fetched_at", -1)
+        .to_list(length=5000)
+    )
+
+    latest_weather: Dict[str, Dict[str, Any]] = {}
+    for doc in weather_docs:
+        port_key = str(doc.get("port_name") or doc.get("entity_id") or "").strip().lower()
+        if port_key and port_key not in latest_weather:
+            latest_weather[port_key] = doc
+
+    latest_news: Dict[str, Dict[str, Any]] = {}
+    for doc in news_docs:
+        port_key = str(doc.get("port_name") or doc.get("entity_id") or "").strip().lower()
+        if port_key and port_key not in latest_news:
+            latest_news[port_key] = doc
+
     inserted = 0
 
     await db.port_congestion_signals.delete_many({})
 
     for port_name, route_rows in grouped.items():
-        signal_doc = build_port_congestion_signal_from_routes(port_name, route_rows)
-
-        port = await db.ports_master.find_one(
-            {"port_name": port_name},
-            {"lat": 1, "lng": 1, "country": 1},
+        port_key = str(port_name).strip().lower()
+        weather_score = float((latest_weather.get(port_key) or {}).get("severity") or 0)
+        news_score = float((latest_news.get(port_key) or {}).get("severity") or 0)
+        signal_doc = build_port_congestion_signal_from_routes(
+            port_name,
+            route_rows,
+            weather_score=weather_score,
+            news_score=news_score,
         )
+
+        port = await get_port_by_name(port_name)
         if port:
             signal_doc["lat"] = port.get("lat")
             signal_doc["lng"] = port.get("lng")

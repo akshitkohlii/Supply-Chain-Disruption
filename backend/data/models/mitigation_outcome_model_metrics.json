@@ -1,0 +1,15 @@
+{
+  "mae": {
+    "target_risk_score": 0.6881060560425333,
+    "target_delay_hours": 0.26803331981658185,
+    "target_recovery_days": 0.11771602128610462,
+    "target_cost_impact": 0.822297721403112
+  },
+  "r2": {
+    "target_risk_score": 0.9967823448104136,
+    "target_delay_hours": 0.9973623310505862,
+    "target_recovery_days": 0.9944314504327608,
+    "target_cost_impact": 0.9818548627523411
+  },
+  "rows": 20000
+}

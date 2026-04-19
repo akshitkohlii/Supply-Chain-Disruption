@@ -20,6 +20,8 @@ async def get_mitigation_plan(alert_id: str) -> Dict[str, Any]:
                 "Prepare contingency inventory.",
                 "Increase monitoring frequency.",
             ],
+            "reroute_plan": None,
+            "stock_plan": None,
             "scenarios": [
                 {
                     "id": "fallback",

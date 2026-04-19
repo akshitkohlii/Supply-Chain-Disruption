@@ -59,4 +59,10 @@ coverage/
 
 # Data
 backend/data/processed/
-# backend/data/raw/
+
+
+# Generated model artifacts
+backend/data/models/*.pkl
+backend/data/models/*.joblib
+backend/data/models/*.h5
+backend/data/models/*.keras

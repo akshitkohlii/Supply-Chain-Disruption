@@ -42,6 +42,20 @@ export type ApiAlertSummary = {
   top_category: string;
 };
 
+export type ApiAlertThresholdSettings = {
+  critical_risk_threshold: number;
+  warning_risk_threshold: number;
+  regenerate_alerts?: boolean | null;
+  generation_result?: {
+    success: boolean;
+    routes_evaluated: number;
+    alerts_upserted: number;
+    skipped: number;
+    critical_risk_threshold: number;
+    warning_risk_threshold: number;
+  } | null;
+};
+
 export type ApiMapPoint = {
   id: string;
   name: string;
@@ -83,27 +97,68 @@ export type ApiAnalyticsOverview = {
   avg_delay_hours: number;
 };
 
+
 export type ApiForecastPoint = {
   day: string;
-  current: number;
-  forecast: number;
+  today_baseline: number;
+  forecast_risk: number;
   drift: number;
+};
+
+export type ApiAnalyticsTimeSeriesPoint = {
+  day: string;
+  date: string;
+  current_risk: number;
+  forecast_risk: number;
+  drift: number;
+  weather_score: number;
+  news_score: number;
+  congestion_score: number;
+  logistics_score: number;
+  emerging_score: number;
+  route_count: number;
 };
 
 export type ApiSupplierExposureItem = {
   supplier_id: string;
   supplier_name: string;
+  supplier_country: string;
+  supplier_region: string;
   risk_score: number;
   dependency_score: number;
-  combined_score: number;
 };
 
 export type ApiLanePressureItem = {
   lane: string;
+  origin_port: string;
+  destination_port: string;
+  pressure_score: number;
+  delay_hours: number;
+  throughput_pct: number;
+  shipment_count: number;
+};
+
+export type ApiLogisticsOverview = {
+  total_shipments: number;
+  avg_delay_hours: number;
+  avg_expected_time_hours: number;
+  avg_actual_time_hours: number;
+  avg_throughput_pct: number;
+  peak_delay_day: {
+    day: string;
+    avg_delay_hours: number;
+  } | null;
+  delay_distribution: {
+    low: number;
+    medium: number;
+    high: number;
+  };
+};
+
+export type ApiLogisticsTimeSeriesPoint = {
+  day: string;
   avg_delay_hours: number;
   throughput_pct: number;
-  pressure_score: number;
-  shipment_count: number;
 };
 
 export type ApiMitigationScenario = {
@@ -113,6 +168,19 @@ export type ApiMitigationScenario = {
   delay_hours: number;
   recovery_days: number;
   cost_impact: number;
+};
+export type ApiReroutePlan = {
+  from: string;
+  to: string;
+  eta_savings_hours: number;
+};
+
+export type ApiStockPlan = {
+  supplier: string;
+  sku_group: string;
+  current_days_cover: number;
+  recommended_days_cover: number;
+  increase_percent: number;
 };
 
 export type ApiMitigationPlan = {
@@ -124,40 +192,39 @@ export type ApiMitigationPlan = {
   impact_reduction: number;
   reason: string;
   actions: string[];
-  reroute_plan?: {
-    from: string;
-    to: string;
-    eta_savings_hours: number;
-  };
-  stock_plan?: {
-    supplier: string;
-    sku_group: string;
-    current_days_cover: number;
-    recommended_days_cover: number;
-    increase_percent: number;
-  };
+  reroute_plan?: ApiReroutePlan;
+  stock_plan?: ApiStockPlan;
   scenarios: ApiMitigationScenario[];
 };
 
 export type ApiAlert = {
   _id?: string;
   alert_id: string;
-  entity_type: "route";
-  entity_id: string;
-  route_key: string;
+  entity_type: "route" | "port";
+  entity_id?: string;
+  route_key?: string | null;
   title: string;
   summary: string;
-  category: "climate" | "geo" | "logistics";
+  category: "supplier" | "port" | "climate" | "geo" | "logistics";
   level: "stable" | "warning" | "critical";
   status: "active" | "acknowledged" | "resolved";
   timestamp: string;
   location: string;
   origin_port?: string;
   destination_port?: string;
+  related_origin_port?: string;
+  related_destination_port?: string;
+  shipment_id?: string;
   risk_score: number;
   lat?: number;
   lng?: number;
   country?: string;
+  weather_score?: number;
+  news_score?: number;
+  logistics_score?: number;
+  congestion_score?: number;
+  emerging_score?: number;
+  final_risk?: number;
   scores?: {
     weather: number;
     news: number;
@@ -224,12 +291,31 @@ export async function getAnalyticsForecast() {
   return apiFetch<ApiForecastPoint[]>("/analytics/forecast");
 }
 
+export async function getAnalyticsTimeSeries(params?: {
+  port?: string;
+  lane?: string;
+}) {
+  const search = new URLSearchParams();
+  if (params?.port) search.set("port", params.port);
+  if (params?.lane) search.set("lane", params.lane);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return apiFetch<ApiAnalyticsTimeSeriesPoint[]>(`/analytics/time-series${suffix}`);
+}
+
 export async function getSupplierExposure() {
   return apiFetch<ApiSupplierExposureItem[]>("/analytics/supplier-exposure");
 }
 
 export async function getLanePressure() {
   return apiFetch<ApiLanePressureItem[]>("/analytics/lane-pressure");
+}
+
+export async function getLogisticsOverview() {
+  return apiFetch<ApiLogisticsOverview>("/logistics/overview");
+}
+
+export async function getLogisticsTimeseries() {
+  return apiFetch<ApiLogisticsTimeSeriesPoint[]>("/logistics/timeseries");
 }
 
 export async function getMitigationPlan(alertId: string) {
@@ -258,8 +344,25 @@ export async function generateAlerts() {
     routes_evaluated: number;
     alerts_upserted: number;
     skipped: number;
+    critical_risk_threshold: number;
+    warning_risk_threshold: number;
   }>("/alerts/generate", {
     method: "POST",
+  });
+}
+
+export async function updateAlertThresholdSettings(params: {
+  criticalRiskThreshold: number;
+  warningRiskThreshold: number;
+  regenerateAlerts?: boolean;
+}) {
+  return apiFetch<ApiAlertThresholdSettings>("/alerts/settings", {
+    method: "PUT",
+    body: JSON.stringify({
+      critical_risk_threshold: params.criticalRiskThreshold,
+      warning_risk_threshold: params.warningRiskThreshold,
+      regenerate_alerts: params.regenerateAlerts ?? true,
+    }),
   });
 }
 
@@ -319,4 +422,58 @@ export async function getEmergingSignals(params?: {
   }
 
   return apiFetch<ApiEmergingSignal[]>(`/emerging-signals?${search.toString()}`);
+}
+
+export type ApiSupplierPrediction = {
+  supplier_id: string;
+  supplier_name: string;
+  disruption_probability: number;
+  predicted_label: "stable" | "warning" | "critical";
+  supplier_risk_score: number;
+  predicted_delay_hours: number;
+  top_factors: string[];
+  features: {
+    supplier_id: string;
+    supplier_name: string;
+    supplier_country: string;
+    supplier_region: string;
+    business_unit: string;
+    shipment_count: number;
+    avg_delay_hours: number;
+    avg_customs_clearance_hours: number;
+    avg_inventory_level: number;
+    avg_safety_stock_level: number;
+    inventory_gap: number;
+    inventory_ratio: number;
+    avg_demand_volatility: number;
+    avg_order_value: number;
+    avg_route_risk: number;
+    avg_route_ml_risk: number;
+    route_warning_share: number;
+    route_critical_share: number;
+  };
+};
+
+export async function getSupplierMlPrediction(supplierId: string) {
+  return apiFetch<ApiSupplierPrediction>(
+    `/supplier-ml/predict/${encodeURIComponent(supplierId)}`
+  );
+}
+
+export type ApiSupplierListItem = {
+  supplier_id: string;
+  supplier_name: string;
+  supplier_country: string;
+  supplier_region: string;
+  avg_delay_hours: number;
+  avg_inventory_level: number;
+  avg_lead_time: number;
+  shipment_count: number;
+  risk_score: number;
+  dependency_score: number;
+  risk_band: "low" | "medium" | "high";
+};
+
+export async function getAllSuppliers() {
+  return apiFetch<ApiSupplierListItem[]>("/suppliers");
 }

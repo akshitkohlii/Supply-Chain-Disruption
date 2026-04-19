@@ -1,0 +1,9 @@
+{
+  "mae": {
+    "target_delay_hours": 1.2828758515651286
+  },
+  "r2": {
+    "target_delay_hours": 0.9553038344505616
+  },
+  "rows": 20000
+}

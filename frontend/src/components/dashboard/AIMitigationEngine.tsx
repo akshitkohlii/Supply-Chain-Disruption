@@ -104,7 +104,7 @@ export default function AIMitigationEngine({
           <div className="rounded-2xl border border-slate-800/70 bg-slate-950/50 p-4">
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-slate-500">
               <Route className="h-3.5 w-3.5 text-cyan-300" />
-              Reroute
+              Alternate Route
             </div>
             <div className="mt-3 space-y-2 text-sm">
               <CompactRow label="From" value={recommendation.reroutePlan.from} />

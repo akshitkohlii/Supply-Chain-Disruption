@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -12,7 +12,6 @@ import {
   ReferenceLine,
 } from "recharts";
 import type {
-  NameType,
   ValueType,
 } from "recharts/types/component/DefaultTooltipContent";
 import type { ApiAnalyticsOverview, ApiForecastPoint } from "@/lib/api";
@@ -36,6 +35,13 @@ const DAY_MAP: Record<string, string> = {
   Friday: "FRI",
   Saturday: "SAT",
   Sunday: "SUN",
+  MON: "MON",
+  TUE: "TUE",
+  WED: "WED",
+  THU: "THU",
+  FRI: "FRI",
+  SAT: "SAT",
+  SUN: "SUN",
 };
 
 function getDomain(values: number[]) {
@@ -64,7 +70,7 @@ function FooterLegend() {
       <div className="flex items-center gap-5">
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-sky-400" />
-          <span>Current Risk</span>
+          <span>Today Baseline</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -83,25 +89,23 @@ export default function PredictiveRiskChart({
   overview,
   isLoading = false,
 }: PredictiveRiskChartProps) {
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-
   const chartData = useMemo(() => {
     return data.map((item) => ({
       day: DAY_MAP[item.day] ?? item.day.slice(0, 3).toUpperCase(),
-      current: Number(item.current.toFixed(1)),
-      forecast: Number(item.forecast.toFixed(1)),
+      baseline: Number(item.today_baseline.toFixed(1)),
+      forecast: Number(item.forecast_risk.toFixed(1)),
       drift: Number(item.drift.toFixed(1)),
     }));
   }, [data]);
 
   const yDomain = useMemo(() => {
-    const values = chartData.flatMap((item) => [item.current, item.forecast]);
+    const values = chartData.flatMap((item) => [item.baseline, item.forecast]);
     return getDomain(values);
   }, [chartData]);
 
   const avgCurrent = useMemo(() => {
     if (!chartData.length) return 0;
-    return chartData.reduce((sum, item) => sum + item.current, 0) / chartData.length;
+    return chartData.reduce((sum, item) => sum + item.baseline, 0) / chartData.length;
   }, [chartData]);
 
   if (isLoading) {
@@ -154,28 +158,21 @@ export default function PredictiveRiskChart({
           <AreaChart
             data={chartData}
             margin={{ top: 0, right: 8, bottom: 8, left: -12 }}
-            onMouseMove={(state) => {
-              if (typeof state?.activeTooltipIndex === "number") {
-                setActiveIndex(state.activeTooltipIndex);
-              }
-            }}
-            onMouseLeave={() => setActiveIndex(null)}
           >
             <defs>
-              <linearGradient id="predictiveCurrentFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.22} />
-                <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.02} />
+              <linearGradient id="currentRiskFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.32} />
+                <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.02} />
               </linearGradient>
-              <linearGradient id="predictiveForecastFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#a78bfa" stopOpacity={0.02} />
+              <linearGradient id="forecastRiskFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.28} />
+                <stop offset="100%" stopColor="#a78bfa" stopOpacity={0.02} />
               </linearGradient>
             </defs>
 
             <CartesianGrid
               vertical={false}
-              stroke="rgba(71,85,105,0.14)"
-              strokeDasharray="3 6"
+              stroke="rgba(148,163,184,0.08)"
             />
 
             <XAxis
@@ -183,7 +180,6 @@ export default function PredictiveRiskChart({
               tick={{ fill: "#94a3b8", fontSize: 11 }}
               tickLine={false}
               axisLine={false}
-              dy={8}
             />
 
             <YAxis
@@ -194,66 +190,53 @@ export default function PredictiveRiskChart({
               width={34}
             />
 
-            <Tooltip content={<ChartTooltip />} cursor={false} />
+            <Tooltip
+              cursor={{ stroke: "rgba(148,163,184,0.18)", strokeWidth: 1 }}
+              content={
+                <ChartTooltip
+                  labelPrefix="Day"
+                  formatter={(value, name) => {
+                    const numeric = getNumericTooltipValue(value);
+                    if (name === "baseline") return [`${numeric.toFixed(1)}`, "Today Baseline"];
+                    if (name === "forecast") return [`${numeric.toFixed(1)}`, "Forecast Risk"];
+                    if (name === "drift") return [`${numeric.toFixed(1)}`, "Drift"];
+                    return [String(value ?? ""), String(name ?? "")];
+                  }}
+                />
+              }
+            />
 
             <ReferenceLine
-              y={Number(avgCurrent.toFixed(1))}
+              y={avgCurrent}
               stroke="rgba(148,163,184,0.22)"
-              strokeDasharray="6 6"
+              strokeDasharray="4 4"
             />
 
             <Area
               type="monotone"
-              dataKey="current"
+              dataKey="baseline"
               stroke="#38bdf8"
-              strokeWidth={2.4}
-              fill="url(#predictiveCurrentFill)"
+              strokeWidth={2}
+              fill="url(#currentRiskFill)"
               activeDot={{ r: 4 }}
-              dot={(props) => {
-                const { cx, cy, index } = props;
-                if (typeof cx !== "number" || typeof cy !== "number") return null;
-                const isActive = activeIndex === index;
-                return (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={isActive ? 4.5 : 3}
-                    fill="#0f172a"
-                    stroke="#38bdf8"
-                    strokeWidth={isActive ? 3 : 2}
-                  />
-                );
-              }}
             />
 
             <Area
               type="monotone"
               dataKey="forecast"
               stroke="#a78bfa"
-              strokeWidth={2.4}
-              fill="url(#predictiveForecastFill)"
+              strokeWidth={2}
+              fill="url(#forecastRiskFill)"
               activeDot={{ r: 4 }}
-              dot={(props) => {
-                const { cx, cy, index } = props;
-                if (typeof cx !== "number" || typeof cy !== "number") return null;
-                const isActive = activeIndex === index;
-                return (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={isActive ? 4.5 : 3}
-                    fill="#0f172a"
-                    stroke="#a78bfa"
-                    strokeWidth={isActive ? 3 : 2}
-                  />
-                );
-              }}
             />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-auto shrink-0 pt-2" style={{ height: FOOTER_HEIGHT }}>
+      <div
+        className="mt-auto flex items-center justify-between border-t border-slate-800/80 pt-3"
+        style={{ minHeight: FOOTER_HEIGHT }}
+      >
         <FooterLegend />
       </div>
     </div>

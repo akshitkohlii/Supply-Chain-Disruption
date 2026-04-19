@@ -15,13 +15,33 @@ async def get_dashboard_overview():
             latest_by_route[route_key] = snapshot
 
     latest_route_snapshots = list(latest_by_route.values())
+    active_non_route_alerts = await db.alerts.find(
+        {
+            "status": "active",
+            "entity_type": {"$ne": "route"},
+        },
+        {
+            "scores.final_risk": 1,
+            "risk_score": 1,
+        },
+    ).to_list(length=5000)
+
+    route_risk_values = [
+        float((snap.get("scores", {}) or {}).get("final_risk", 0) or 0)
+        for snap in latest_route_snapshots
+    ]
+    non_route_alert_risk_values = [
+        float((alert.get("scores", {}) or {}).get("final_risk", alert.get("risk_score", 0)) or 0)
+        for alert in active_non_route_alerts
+    ]
+
+    combined_risk_values = route_risk_values + non_route_alert_risk_values
 
     if latest_route_snapshots:
         global_risk_score = round(
-            sum((snap.get("scores", {}) or {}).get("final_risk", 0) for snap in latest_route_snapshots)
-            / len(latest_route_snapshots),
+            sum(combined_risk_values) / len(combined_risk_values),
             2,
-        )
+        ) if combined_risk_values else 0
         high_risk_routes = sum(
             1
             for snap in latest_route_snapshots

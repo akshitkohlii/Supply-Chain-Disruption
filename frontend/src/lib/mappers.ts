@@ -4,9 +4,12 @@ import type {
   ApiDashboardOverview,
   ApiMapPoint,
 } from "./api";
+import type { AppSettings } from "./settings";
 
 export type AlertItem = {
   id: string;
+  entityType?: "route" | "port";
+  entityId?: string;
   title: string;
   location: string;
   country: string;
@@ -42,6 +45,9 @@ export type AlertItem = {
   routeKey?: string;
   originPort?: string;
   destinationPort?: string;
+  relatedOriginPort?: string;
+  relatedDestinationPort?: string;
+  shipmentId?: string;
   anchorPort?: string;
   isMapBacked?: boolean;
 };
@@ -71,8 +77,17 @@ function hasValidCoordinates(
 }
 
 export function mapApiAlertToUiAlert(alert: ApiAlert): AlertItem {
+  const weatherScore = alert.scores?.weather ?? alert.weather_score ?? 0;
+  const newsScore = alert.scores?.news ?? alert.news_score ?? 0;
+  const logisticsScore = alert.scores?.logistics ?? alert.logistics_score ?? 0;
+  const congestionScore = alert.scores?.congestion ?? alert.congestion_score ?? 0;
+  const emergingScore = alert.scores?.emerging ?? alert.emerging_score;
+  const finalRiskScore = alert.scores?.final_risk ?? alert.final_risk ?? alert.risk_score;
+
   return {
     id: alert.alert_id,
+    entityType: alert.entity_type,
+    entityId: alert.entity_id,
     title: alert.title,
     location:
       alert.location ||
@@ -92,12 +107,12 @@ export function mapApiAlertToUiAlert(alert: ApiAlert): AlertItem {
     ],
     supplierName: undefined,
     delayHours: undefined,
-    weatherRisk: alert.scores?.weather,
-    portCongestion: alert.scores?.congestion,
-    newsScore: alert.scores?.news,
-    logisticsScore: alert.scores?.logistics,
-    congestionScore: alert.scores?.congestion,
-    emergingScore: alert.scores?.emerging,
+    weatherRisk: weatherScore,
+    portCongestion: congestionScore,
+    newsScore,
+    logisticsScore,
+    congestionScore,
+    emergingScore,
     emergingSignals:
       alert.emerging_impact?.signals?.map((signal) => ({
         signalId: signal.signal_id,
@@ -107,17 +122,45 @@ export function mapApiAlertToUiAlert(alert: ApiAlert): AlertItem {
         impactScore: signal.impact_score,
         title: signal.title,
       })) ?? [],
-    finalRiskScore: alert.scores?.final_risk,
-    mlRiskScore: alert.scores?.ml ?? alert.ml_prediction?.ml_risk_score,
+    finalRiskScore,
+    mlRiskScore:
+      alert.scores?.ml ?? alert.ml_prediction?.ml_risk_score,
     mlProbability: alert.ml_prediction?.disruption_probability,
     predictedDelayHours: alert.ml_prediction?.predicted_delay_hours,
     mlTopFactors: alert.ml_prediction?.top_factors ?? [],
-    routeKey: alert.route_key,
-    originPort: alert.origin_port,
-    destinationPort: alert.destination_port,
+    routeKey: alert.route_key ?? undefined,
+    originPort: alert.origin_port ?? alert.related_origin_port ?? undefined,
+    destinationPort:
+      alert.destination_port ??
+      alert.related_destination_port ??
+      undefined,
+    relatedOriginPort: alert.related_origin_port ?? undefined,
+    relatedDestinationPort:
+      alert.related_destination_port ?? alert.destination_port ?? undefined,
+    shipmentId: alert.shipment_id ?? undefined,
     anchorPort: alert.destination_port ?? alert.origin_port,
     isMapBacked: true,
   };
+}
+
+export function applyAlertThresholds(
+  alert: AlertItem,
+  settings: AppSettings
+): AlertItem {
+  const score = alert.finalRiskScore;
+
+  if (typeof score !== "number" || !Number.isFinite(score)) {
+    return alert;
+  }
+
+  const level: AlertItem["level"] =
+    score >= settings.criticalRiskThreshold
+      ? "critical"
+      : score >= settings.warningRiskThreshold
+        ? "warning"
+        : "stable";
+
+  return { ...alert, level };
 }
 
 export function mapApiMapPointToUiAlert(point: ApiMapPoint): AlertItem | null {
@@ -194,28 +237,28 @@ export function buildDashboardKpisFromApi(params: {
 
   return [
     {
-      title: "Global Risk Score",
+      title: "Network Risk Index",
       value: formatInt(Math.round(globalRiskScore)),
       change: `${alertSummary?.top_category ?? "stable"} focus`,
       trend: globalRiskScore >= 70 ? "up" : globalRiskScore >= 40 ? "neutral" : "down",
       risk: globalRiskScore >= 70 ? "high" : globalRiskScore >= 40 ? "medium" : "low",
     },
     {
-      title: "Critical Alerts",
+      title: "Active Critical Alerts",
       value: formatInt(criticalAlerts),
       change: `${formatInt(alertSummary?.active_alerts ?? 0)} active`,
       trend: criticalAlerts > 0 ? "up" : "neutral",
       risk: criticalAlerts >= 10 ? "high" : criticalAlerts >= 4 ? "medium" : "low",
     },
     {
-      title: "High-Risk Routes",
+      title: "Routes In Warning/Critical State",
       value: formatInt(highRiskRoutes),
       change: "latest route snapshots",
       trend: highRiskRoutes > 0 ? "up" : "neutral",
       risk: highRiskRoutes >= 20 ? "high" : highRiskRoutes >= 8 ? "medium" : "low",
     },
     {
-      title: "Delayed Shipments %",
+      title: "Shipment Delay Exposure",
       value: formatPercent(delayedShipmentsPercent),
       change: "from shipment baseline",
       trend:
@@ -232,8 +275,8 @@ export function buildDashboardKpisFromApi(params: {
             : "low",
     },
     {
-      title: "Avg Time to Recover",
-      value: `${Math.max(12, Math.round(avgRouteDelayHours * 1.8))}h`,
+      title: "Average Route Delay",
+      value: `${avgRouteDelayHours.toFixed(1)}h`,
       change: `${avgRouteDelayHours.toFixed(1)}h avg delay`,
       trend: "neutral",
       risk:
