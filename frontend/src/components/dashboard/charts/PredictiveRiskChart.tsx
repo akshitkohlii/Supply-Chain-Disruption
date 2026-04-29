@@ -64,22 +64,19 @@ function getNumericTooltipValue(value: ValueType | undefined) {
   return Number(value ?? 0);
 }
 
-function FooterLegend() {
+function FooterLegend({ baselineValue }: { baselineValue: number }) {
   return (
     <div className="flex items-center justify-between gap-4 text-[11px] text-slate-400">
       <div className="flex items-center gap-5">
-        <div className="flex items-center gap-2">
-          <span className="h-3 w-3 rounded-full bg-sky-400" />
-          <span>Today Baseline</span>
-        </div>
-
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-violet-400" />
           <span>Forecast Risk</span>
         </div>
       </div>
 
-      <div className="whitespace-nowrap text-right text-slate-500">7-day trend</div>
+      <div className="whitespace-nowrap text-right text-slate-500">
+        Baseline {baselineValue.toFixed(1)}
+      </div>
     </div>
   );
 }
@@ -99,13 +96,13 @@ export default function PredictiveRiskChart({
   }, [data]);
 
   const yDomain = useMemo(() => {
-    const values = chartData.flatMap((item) => [item.baseline, item.forecast]);
+    const values = chartData.flatMap((item) => [item.forecast]);
     return getDomain(values);
   }, [chartData]);
 
-  const avgCurrent = useMemo(() => {
+  const baselineValue = useMemo(() => {
     if (!chartData.length) return 0;
-    return chartData.reduce((sum, item) => sum + item.baseline, 0) / chartData.length;
+    return chartData[0]?.baseline ?? 0;
   }, [chartData]);
 
   if (isLoading) {
@@ -197,7 +194,6 @@ export default function PredictiveRiskChart({
                   labelPrefix="Day"
                   formatter={(value, name) => {
                     const numeric = getNumericTooltipValue(value);
-                    if (name === "baseline") return [`${numeric.toFixed(1)}`, "Today Baseline"];
                     if (name === "forecast") return [`${numeric.toFixed(1)}`, "Forecast Risk"];
                     if (name === "drift") return [`${numeric.toFixed(1)}`, "Drift"];
                     return [String(value ?? ""), String(name ?? "")];
@@ -207,18 +203,9 @@ export default function PredictiveRiskChart({
             />
 
             <ReferenceLine
-              y={avgCurrent}
+              y={baselineValue}
               stroke="rgba(148,163,184,0.22)"
               strokeDasharray="4 4"
-            />
-
-            <Area
-              type="monotone"
-              dataKey="baseline"
-              stroke="#38bdf8"
-              strokeWidth={2}
-              fill="url(#currentRiskFill)"
-              activeDot={{ r: 4 }}
             />
 
             <Area
@@ -237,7 +224,7 @@ export default function PredictiveRiskChart({
         className="mt-auto flex items-center justify-between border-t border-slate-800/80 pt-3"
         style={{ minHeight: FOOTER_HEIGHT }}
       >
-        <FooterLegend />
+        <FooterLegend baselineValue={baselineValue} />
       </div>
     </div>
   );

@@ -1,0 +1,36 @@
+{
+  "rows": 20000,
+  "news_rows": 20000,
+  "threshold": 0.8395,
+  "accuracy": 0.97575,
+  "precision": 0.975512243878061,
+  "recall": 0.976,
+  "f1": 0.9757560609847538,
+  "classification_report": {
+    "0": {
+      "precision": 0.9759879939969985,
+      "recall": 0.9755,
+      "f1-score": 0.975743935983996,
+      "support": 2000.0
+    },
+    "1": {
+      "precision": 0.975512243878061,
+      "recall": 0.976,
+      "f1-score": 0.9757560609847538,
+      "support": 2000.0
+    },
+    "accuracy": 0.97575,
+    "macro avg": {
+      "precision": 0.9757501189375297,
+      "recall": 0.97575,
+      "f1-score": 0.9757499984843749,
+      "support": 4000.0
+    },
+    "weighted avg": {
+      "precision": 0.9757501189375298,
+      "recall": 0.97575,
+      "f1-score": 0.9757499984843748,
+      "support": 4000.0
+    }
+  }
+}

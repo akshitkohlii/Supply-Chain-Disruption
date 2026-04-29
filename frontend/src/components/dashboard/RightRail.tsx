@@ -137,6 +137,7 @@ export default function RightRail({
   const riskScore = buildRiskScore(selectedAlert);
   const confidence = buildConfidence(selectedAlert);
   const isRouteAlert = selectedAlert.entityType !== "port";
+  const contextTitle = isRouteAlert ? "Selected Route Alert" : "Selected Port Alert";
   const metadataTitle = isRouteAlert ? "Route Metadata" : "Port Metadata";
 
   const effectiveMlPrediction = mlPrediction
@@ -169,7 +170,7 @@ export default function RightRail({
           transition={{ duration: 0.22, ease: "easeOut" }}
           className="sticky top-4"
         >
-          <div className="relative h-157 overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl">
+          <div className="relative h-153 overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl">
             <div className={`pointer-events-none absolute inset-0 bg-linear-to-br ${levelUI.accent}`} />
 
             <div className="relative flex h-full flex-col">
@@ -180,7 +181,7 @@ export default function RightRail({
                       Context Panel
                     </div>
                     <div className="mt-1 text-sm font-medium text-white">
-                      Selected Route Alert
+                      {contextTitle}
                     </div>
                   </div>
 

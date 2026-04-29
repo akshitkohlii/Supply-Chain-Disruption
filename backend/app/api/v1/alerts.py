@@ -57,7 +57,10 @@ async def patch_alert_status(
     alert_id: str,
     status: str = Query(..., pattern="^(active|acknowledged|resolved)$"),
 ):
-    return await service_update_alert_status(alert_id=alert_id, status=status)
+    try:
+        return await service_update_alert_status(alert_id=alert_id, status=status)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @mitigation_router.get("/{alert_id}", response_model=MitigationPlanResponse)

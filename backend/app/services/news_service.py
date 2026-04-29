@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 import httpx
 
 from app.core.config import settings
+from app.services.news_relevance_model_service import predict_news_relevance
 
 NEWS_API_BASE_URL = "https://newsapi.org/v2/everything"
 
@@ -19,6 +20,58 @@ DISRUPTION_KEYWORDS = [
     "backlog",
     "reroute",
     "closure",
+]
+
+QUERY_DISRUPTION_KEYWORDS = [
+    "strike",
+    "congestion",
+    "shutdown",
+    "blockade",
+    "closure",
+    "customs",
+]
+
+STRONG_DISRUPTION_TERMS = [
+    "strike",
+    "shutdown",
+    "blockade",
+    "closure",
+    "closed",
+    "halt",
+    "suspended",
+    "sanction",
+    "conflict",
+    "war",
+    "attack",
+    "explosion",
+    "cyberattack",
+]
+
+PORT_CONTEXT_TERMS = [
+    "port",
+    "terminal",
+    "harbor",
+    "harbour",
+    "vessel",
+    "shipping",
+    "maritime",
+    "container",
+    "customs",
+    "cargo",
+    "berth",
+    "canal",
+    "freight",
+]
+
+WEAK_CONTEXT_TERMS = [
+    "economy",
+    "markets",
+    "stock",
+    "election",
+    "festival",
+    "celebrity",
+    "sports",
+    "tourism",
 ]
 
 REGIONAL_CONFLICT_HOTSPOTS = [
@@ -139,7 +192,7 @@ def build_news_query(entity: Dict[str, Any]) -> str:
     name_variants = _port_query_variants(name)
     name_query = " OR ".join([f'"{variant}"' for variant in name_variants if variant])
 
-    keyword_query = " OR ".join([f'"{kw}"' for kw in DISRUPTION_KEYWORDS])
+    keyword_query = " OR ".join([f'"{kw}"' for kw in QUERY_DISRUPTION_KEYWORDS])
 
     country_key = _normalize_country(country)
     regional_queries: List[str] = []
@@ -198,29 +251,151 @@ def _matching_hotspots(article: Dict[str, Any], entity: Dict[str, Any]) -> List[
     return matches
 
 
-def _is_disruption_relevant(article: Dict[str, Any], entity: Dict[str, Any]) -> bool:
+def _article_text(article: Dict[str, Any]) -> str:
     title = (article.get("title") or "").lower()
     description = (article.get("description") or "").lower()
-    content = f"{title} {description}"
+    return f"{title} {description}".strip()
 
+
+def _term_hits(content: str, terms: List[str]) -> int:
+    return sum(1 for term in terms if term in content)
+
+
+def _published_age_hours(article: Dict[str, Any]) -> float:
+    published_at = article.get("publishedAt")
+    if not published_at or not isinstance(published_at, str):
+        return 72.0
+
+    try:
+        parsed = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(
+            0.0,
+            round((datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0, 2),
+        )
+    except ValueError:
+        return 72.0
+
+
+def _news_article_features(article: Dict[str, Any], entity: Dict[str, Any]) -> Dict[str, Any]:
+    content = _article_text(article)
+    title = (article.get("title") or "").lower()
     port_name = _normalize_name(
         entity.get("name")
         or entity.get("port_name")
         or entity.get("location")
         or ""
     ).lower()
+    country = _normalize_country(entity.get("country"))
 
     variants = [v.lower() for v in _port_query_variants(port_name)]
+    exact_port_match = any(variant and variant in title for variant in variants)
     name_match = any(variant and variant in content for variant in variants)
-    disruption_match = any(term in content for term in DISRUPTION_KEYWORDS)
-    hotspot_match = bool(_matching_hotspots(article, entity))
+    country_match = bool(country and country in content)
+    disruption_hits = _term_hits(content, DISRUPTION_KEYWORDS)
+    strong_hits = _term_hits(content, STRONG_DISRUPTION_TERMS)
+    port_context_hits = _term_hits(content, PORT_CONTEXT_TERMS)
+    weak_context_hits = _term_hits(content, WEAK_CONTEXT_TERMS)
+    hotspot_matches = _matching_hotspots(article, entity)
+    hotspot_match = bool(hotspot_matches)
+    published_age_hours = _published_age_hours(article)
+    recency_bonus = max(0.0, 24.0 - min(24.0, published_age_hours / 2.0))
 
-    return (name_match and disruption_match) or hotspot_match
+    score = 0.0
+    if exact_port_match:
+        score += 4.0
+    elif name_match:
+        score += 3.0
+    elif country_match:
+        score += 0.35
+
+    score += min(2.5, disruption_hits * 0.55)
+    score += min(2.5, strong_hits * 1.0)
+    score += min(3.2, port_context_hits * 0.9)
+    if hotspot_match:
+        score += 2.0
+    score += recency_bonus / 8.0
+    score -= min(3.0, weak_context_hits * 1.0)
+
+    # Country-only mentions should not become disruption signals unless the
+    # article also has clear logistics/port context and strong disruption cues.
+    hard_relevant = (
+        exact_port_match
+        or (
+            name_match
+            and port_context_hits >= 1
+            and (strong_hits >= 1 or disruption_hits >= 2)
+        )
+        or (
+            hotspot_match
+            and (
+                strong_hits >= 1
+                or (disruption_hits >= 2 and port_context_hits >= 1)
+            )
+        )
+        or (
+            country_match
+            and strong_hits >= 1
+            and port_context_hits >= 2
+            and disruption_hits >= 2
+        )
+    )
+
+    return {
+        "title": article.get("title") or "",
+        "summary": article.get("description") or "",
+        "port_name": entity.get("port_name") or entity.get("name") or "",
+        "country": entity.get("country") or "",
+        "content": content,
+        "name_match": name_match,
+        "country_match": country_match,
+        "exact_port_match": exact_port_match,
+        "disruption_hits": disruption_hits,
+        "strong_hits": strong_hits,
+        "port_context_hits": port_context_hits,
+        "weak_context_hits": weak_context_hits,
+        "hotspot_matches": hotspot_matches,
+        "hotspot_match": hotspot_match,
+        "published_age_hours": published_age_hours,
+        "score": round(score, 2),
+        "hard_relevant": hard_relevant,
+    }
 
 
-def compute_news_severity(matched_count: int) -> int:
-    # smoother, less saturated than totalResults-based scoring
-    return min(matched_count * 20, 100)
+def _is_disruption_relevant(article: Dict[str, Any], entity: Dict[str, Any]) -> bool:
+    features = _news_article_features(article, entity)
+    has_strong_entity_context = bool(
+        features["exact_port_match"]
+        or (
+            features["name_match"]
+            and features["port_context_hits"] >= 1
+        )
+        or (
+            features["hotspot_match"]
+            and features["strong_hits"] >= 1
+        )
+    )
+    prediction = predict_news_relevance(features)
+    if prediction:
+        return bool(
+            prediction["is_relevant"]
+            and (
+                has_strong_entity_context
+                or (
+                    features["country_match"]
+                    and features["port_context_hits"] >= 2
+                    and features["strong_hits"] >= 1
+                )
+            )
+        )
+    return features["hard_relevant"] and features["score"] >= 6.5
+
+
+def compute_news_severity(matched_count: int, weighted_score: float = 0.0) -> int:
+    count_component = min(matched_count * 14, 42)
+    score_component = min(weighted_score * 8, 58)
+    return min(100, round(count_component + score_component))
 
 
 async def fetch_news_for_supplier(entity: Dict[str, Any]) -> Dict[str, Any]:
@@ -268,13 +443,37 @@ def normalize_news_signal(
 ) -> Dict[str, Any]:
     matched_articles: List[Dict[str, Any]] = api_payload.get("matched_articles", []) or []
     matched_count = int(api_payload.get("matchedCount", 0) or 0)
-    severity = compute_news_severity(matched_count)
+    article_features = [
+        _news_article_features(article, entity) for article in matched_articles
+    ]
+    weighted_score = round(
+        sum(float(item.get("score", 0.0) or 0.0) for item in article_features[:5]),
+        2,
+    )
+    severity = compute_news_severity(matched_count, weighted_score)
     matched_hotspots = sorted(
         {
             hotspot
             for article in matched_articles
             for hotspot in _matching_hotspots(article, entity)
         }
+    )
+    avg_age_hours = round(
+        (
+            sum(float(item.get("published_age_hours", 72.0) or 72.0) for item in article_features)
+            / matched_count
+        ),
+        2,
+    ) if matched_count else 72.0
+    keyword_hits = sum(int(item.get("disruption_hits", 0) or 0) for item in article_features)
+    strong_hits = sum(int(item.get("strong_hits", 0) or 0) for item in article_features)
+    port_context_hits = sum(int(item.get("port_context_hits", 0) or 0) for item in article_features)
+    exact_port_mentions = sum(1 for item in article_features if item.get("exact_port_match"))
+    hotspot_article_count = sum(1 for item in article_features if item.get("hotspot_match"))
+    weak_context_hits = sum(int(item.get("weak_context_hits", 0) or 0) for item in article_features)
+    sentiment_score = round(
+        -min(1.0, (strong_hits * 0.22) + (keyword_hits * 0.05) - (weak_context_hits * 0.08)),
+        3,
     )
 
     return {
@@ -292,6 +491,17 @@ def normalize_news_signal(
         "impact_scope": "regional" if matched_hotspots else "port",
         "matched_hotspots": matched_hotspots,
         "article_count": matched_count,
+        "features": {
+            "keyword_hits": keyword_hits,
+            "strong_disruption_hits": strong_hits,
+            "port_context_hits": port_context_hits,
+            "exact_port_mentions": exact_port_mentions,
+            "hotspot_article_count": hotspot_article_count,
+            "contains_disruption_terms": 1 if keyword_hits > 0 else 0,
+            "published_age_hours": avg_age_hours,
+            "sentiment_score": sentiment_score,
+            "relevance_score": weighted_score,
+        },
         "keywords": DISRUPTION_KEYWORDS,
         "articles": [
             {
@@ -299,8 +509,9 @@ def normalize_news_signal(
                 "source": (item.get("source") or {}).get("name"),
                 "published_at": item.get("publishedAt"),
                 "url": item.get("url"),
+                "relevance_score": article_features[index]["score"] if index < len(article_features) else None,
             }
-            for item in matched_articles[:10]
+            for index, item in enumerate(matched_articles[:10])
         ],
         "event_time": datetime.now(timezone.utc),
         "fetched_at": datetime.now(timezone.utc),

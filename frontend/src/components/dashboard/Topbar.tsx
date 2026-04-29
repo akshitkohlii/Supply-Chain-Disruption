@@ -2,9 +2,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bell, Globe2, UserCircle2, X, CheckCheck } from "lucide-react";
+import { Bell, Globe2, UserCircle2, X } from "lucide-react";
+import type { AlertItem } from "@/lib/mappers";
 import TopPill from "./ui/TopPill";
-import type { AlertItem } from "@/lib/dashboard-data";
 
 type ScopeFilter = "Global" | "Regional";
 type TimeFilter = "Last 24 Hours" | "Last 7 Days" | "Last 30 Days";
@@ -25,6 +25,20 @@ function getLevelDot(level: AlertItem["level"]) {
   if (level === "critical") return "bg-rose-400";
   if (level === "warning") return "bg-amber-400";
   return "bg-cyan-400";
+}
+
+function formatNotificationDate(timestamp: string) {
+  const parsed = new Date(timestamp);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
+  const trimmed = timestamp.trim();
+  return trimmed.length > 10 ? trimmed.slice(0, 10) : trimmed;
 }
 
 export default function Topbar({
@@ -142,7 +156,7 @@ export default function Topbar({
                                   </p>
 
                                   <span className="text-[11px] text-slate-500 whitespace-nowrap">
-                                    {alert.timestamp}
+                                    {formatNotificationDate(alert.timestamp)}
                                   </span>
                                 </div>
 

@@ -1,173 +1,212 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import {
+  getCachedApiData,
   getAlertSummary,
   getAlerts,
   getAnalyticsForecast,
   getAnalyticsOverview,
+  getDashboardFilterOptions,
   getDashboardOverview,
   getEmergingSignals,
   getLanePressure,
   getSupplierExposure,
 } from "@/lib/api";
-import { mapApiAlertToUiAlert, type AlertItem } from "@/lib/mappers";
+import { mapApiAlertToUiAlert } from "@/lib/mappers";
 import type { DashboardDataState } from "../lib/types";
 
 const DASHBOARD_REFRESH_MS =
   Number(process.env.NEXT_PUBLIC_DASHBOARD_REFRESH_MS ?? "60000") || 60000;
 
+const cachedDashboardOverview = getCachedApiData<DashboardDataState["dashboardOverview"]>(
+  "/dashboard/overview"
+);
+const cachedDashboardFilterOptions = getCachedApiData<
+  DashboardDataState["dashboardFilterOptions"]
+>("/dashboard/filter-options");
+const cachedAlertSummary = getCachedApiData<DashboardDataState["alertSummary"]>(
+  "/alerts/summary"
+);
+const cachedAlerts = getCachedApiData<Parameters<typeof mapApiAlertToUiAlert>[0][]>(
+  "/alerts?limit=100"
+);
+const cachedAnalyticsOverview =
+  getCachedApiData<DashboardDataState["analyticsOverview"]>("/analytics/overview");
+const cachedForecastData =
+  getCachedApiData<DashboardDataState["forecastData"]>("/analytics/forecast");
+const cachedSupplierExposureData = getCachedApiData<
+  DashboardDataState["supplierExposureData"]
+>("/analytics/supplier-exposure");
+const cachedLanePressureData = getCachedApiData<DashboardDataState["lanePressureData"]>(
+  "/analytics/lane-pressure"
+);
+const cachedEmergingSignals = getCachedApiData<DashboardDataState["emergingSignals"]>(
+  "/emerging-signals?limit=12&relevant_only=true"
+);
+
+const INITIAL_STATE: DashboardDataState = {
+  dashboardOverview: cachedDashboardOverview ?? null,
+  dashboardFilterOptions: cachedDashboardFilterOptions ?? null,
+  alertSummary: cachedAlertSummary ?? null,
+  alerts: cachedAlerts?.map(mapApiAlertToUiAlert) ?? [],
+  analyticsOverview: cachedAnalyticsOverview ?? null,
+  forecastData: cachedForecastData ?? [],
+  supplierExposureData: cachedSupplierExposureData ?? [],
+  lanePressureData: cachedLanePressureData ?? [],
+  emergingSignals: cachedEmergingSignals ?? [],
+  isLoading:
+    !cachedDashboardOverview &&
+    !cachedDashboardFilterOptions &&
+    !cachedAlertSummary &&
+    !cachedAlerts?.length,
+  error: null,
+  midLoading:
+    !cachedAnalyticsOverview &&
+    !cachedForecastData?.length &&
+    !cachedSupplierExposureData?.length &&
+    !cachedLanePressureData?.length,
+  midError: null,
+  emergingSignalsLoading: !cachedEmergingSignals?.length,
+  emergingSignalsError: null,
+};
+
+let dashboardState: DashboardDataState = INITIAL_STATE;
+const listeners = new Set<() => void>();
+
+let pollingStarted = false;
+let hasLoadedDashboard = false;
+let hasLoadedMidCards = false;
+let hasLoadedEmergingSignals = false;
+
+function emitChange() {
+  listeners.forEach((listener) => listener());
+}
+
+function updateDashboardState(
+  partial:
+    | Partial<DashboardDataState>
+    | ((current: DashboardDataState) => Partial<DashboardDataState>)
+) {
+  const nextPartial =
+    typeof partial === "function" ? partial(dashboardState) : partial;
+  dashboardState = {
+    ...dashboardState,
+    ...nextPartial,
+  };
+  emitChange();
+}
+
+async function loadDashboard() {
+  try {
+    if (!hasLoadedDashboard) {
+      updateDashboardState({ isLoading: true });
+    }
+    updateDashboardState({ error: null });
+
+    const [overview, filterOptions, summary, alertsResponse] = await Promise.all([
+      getDashboardOverview(),
+      getDashboardFilterOptions(),
+      getAlertSummary(),
+      getAlerts(100),
+    ]);
+
+    updateDashboardState({
+      dashboardOverview: overview,
+      dashboardFilterOptions: filterOptions,
+      alertSummary: summary,
+      alerts: alertsResponse.map(mapApiAlertToUiAlert),
+    });
+    hasLoadedDashboard = true;
+  } catch (err) {
+    updateDashboardState({
+      error: err instanceof Error ? err.message : "Failed to load dashboard.",
+    });
+  } finally {
+    updateDashboardState({ isLoading: false });
+    window.setTimeout(loadDashboard, DASHBOARD_REFRESH_MS);
+  }
+}
+
+async function loadMidCards() {
+  try {
+    if (!hasLoadedMidCards) {
+      updateDashboardState({ midLoading: true });
+    }
+    updateDashboardState({ midError: null });
+
+    const [overview, forecast, supplierExposure, lanePressure] = await Promise.all([
+      getAnalyticsOverview(),
+      getAnalyticsForecast(),
+      getSupplierExposure(),
+      getLanePressure(),
+    ]);
+
+    updateDashboardState({
+      analyticsOverview: overview,
+      forecastData: forecast,
+      supplierExposureData: supplierExposure,
+      lanePressureData: lanePressure,
+    });
+    hasLoadedMidCards = true;
+  } catch (err) {
+    updateDashboardState({
+      midError: err instanceof Error ? err.message : "Failed to load analytics.",
+    });
+  } finally {
+    updateDashboardState({ midLoading: false });
+    window.setTimeout(loadMidCards, DASHBOARD_REFRESH_MS);
+  }
+}
+
+async function loadEmergingSignals() {
+  try {
+    if (!hasLoadedEmergingSignals) {
+      updateDashboardState({ emergingSignalsLoading: true });
+    }
+    updateDashboardState({ emergingSignalsError: null });
+
+    const result = await getEmergingSignals({ limit: 12 });
+
+    updateDashboardState({ emergingSignals: result });
+    hasLoadedEmergingSignals = true;
+  } catch (err) {
+    updateDashboardState({
+      emergingSignalsError:
+        err instanceof Error ? err.message : "Failed to load emerging signals.",
+    });
+  } finally {
+    updateDashboardState({ emergingSignalsLoading: false });
+    window.setTimeout(loadEmergingSignals, DASHBOARD_REFRESH_MS);
+  }
+}
+
+function ensurePollingStarted() {
+  if (pollingStarted || typeof window === "undefined") {
+    return;
+  }
+
+  pollingStarted = true;
+  void loadDashboard();
+  void loadMidCards();
+  void loadEmergingSignals();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function getSnapshot() {
+  return dashboardState;
+}
+
 export function useDashboardData(): DashboardDataState {
-  const [dashboardOverview, setDashboardOverview] =
-    useState<DashboardDataState["dashboardOverview"]>(null);
-  const [alertSummary, setAlertSummary] =
-    useState<DashboardDataState["alertSummary"]>(null);
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-
-  const [analyticsOverview, setAnalyticsOverview] =
-    useState<DashboardDataState["analyticsOverview"]>(null);
-  const [forecastData, setForecastData] =
-    useState<DashboardDataState["forecastData"]>([]);
-  const [supplierExposureData, setSupplierExposureData] =
-    useState<DashboardDataState["supplierExposureData"]>([]);
-  const [lanePressureData, setLanePressureData] =
-    useState<DashboardDataState["lanePressureData"]>([]);
-
-  const [emergingSignals, setEmergingSignals] =
-    useState<DashboardDataState["emergingSignals"]>([]);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [midLoading, setMidLoading] = useState(true);
-  const [midError, setMidError] = useState<string | null>(null);
-
-  const [emergingSignalsLoading, setEmergingSignalsLoading] = useState(true);
-  const [emergingSignalsError, setEmergingSignalsError] = useState<string | null>(null);
-  const hasLoadedDashboardRef = useRef(false);
-  const hasLoadedMidCardsRef = useRef(false);
-  const hasLoadedEmergingSignalsRef = useRef(false);
-
   useEffect(() => {
-    let isCancelled = false;
-    let dashboardTimer: ReturnType<typeof setTimeout> | null = null;
-    let midCardsTimer: ReturnType<typeof setTimeout> | null = null;
-    let emergingSignalsTimer: ReturnType<typeof setTimeout> | null = null;
-
-    async function loadDashboard() {
-      try {
-        if (!hasLoadedDashboardRef.current) {
-          setIsLoading(true);
-        }
-        setError(null);
-
-        const [overview, summary, alertsResponse] = await Promise.all([
-          getDashboardOverview(),
-          getAlertSummary(),
-          getAlerts(100),
-        ]);
-
-        if (isCancelled) return;
-
-        setDashboardOverview(overview);
-        setAlertSummary(summary);
-        setAlerts(alertsResponse.map(mapApiAlertToUiAlert));
-        hasLoadedDashboardRef.current = true;
-      } catch (err) {
-        if (isCancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load dashboard.");
-      } finally {
-        if (!isCancelled) {
-          setIsLoading(false);
-          dashboardTimer = setTimeout(loadDashboard, DASHBOARD_REFRESH_MS);
-        }
-      }
-    }
-
-    async function loadMidCards() {
-      try {
-        if (!hasLoadedMidCardsRef.current) {
-          setMidLoading(true);
-        }
-        setMidError(null);
-
-        const [overview, forecast, supplierExposure, lanePressure] =
-          await Promise.all([
-            getAnalyticsOverview(),
-            getAnalyticsForecast(),
-            getSupplierExposure(),
-            getLanePressure(),
-          ]);
-
-        if (isCancelled) return;
-
-        setAnalyticsOverview(overview);
-        setForecastData(forecast);
-        setSupplierExposureData(supplierExposure);
-        setLanePressureData(lanePressure);
-        hasLoadedMidCardsRef.current = true;
-      } catch (err) {
-        if (isCancelled) return;
-        setMidError(err instanceof Error ? err.message : "Failed to load analytics.");
-      } finally {
-        if (!isCancelled) {
-          setMidLoading(false);
-          midCardsTimer = setTimeout(loadMidCards, DASHBOARD_REFRESH_MS);
-        }
-      }
-    }
-
-    async function loadEmergingSignals() {
-      try {
-        if (!hasLoadedEmergingSignalsRef.current) {
-          setEmergingSignalsLoading(true);
-        }
-        setEmergingSignalsError(null);
-
-        const result = await getEmergingSignals({ limit: 12 });
-
-        if (isCancelled) return;
-        setEmergingSignals(result);
-        hasLoadedEmergingSignalsRef.current = true;
-      } catch (err) {
-        if (isCancelled) return;
-        setEmergingSignalsError(
-          err instanceof Error ? err.message : "Failed to load emerging signals."
-        );
-      } finally {
-        if (!isCancelled) {
-          setEmergingSignalsLoading(false);
-          emergingSignalsTimer = setTimeout(loadEmergingSignals, DASHBOARD_REFRESH_MS);
-        }
-      }
-    }
-
-    loadDashboard();
-    loadMidCards();
-    loadEmergingSignals();
-
-    return () => {
-      isCancelled = true;
-      if (dashboardTimer) clearTimeout(dashboardTimer);
-      if (midCardsTimer) clearTimeout(midCardsTimer);
-      if (emergingSignalsTimer) clearTimeout(emergingSignalsTimer);
-    };
+    ensurePollingStarted();
   }, []);
 
-  return {
-    dashboardOverview,
-    alertSummary,
-    alerts,
-    analyticsOverview,
-    forecastData,
-    supplierExposureData,
-    lanePressureData,
-    emergingSignals,
-    isLoading,
-    error,
-    midLoading,
-    midError,
-    emergingSignalsLoading,
-    emergingSignalsError,
-  };
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

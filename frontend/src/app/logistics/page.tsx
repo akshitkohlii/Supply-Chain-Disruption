@@ -7,7 +7,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -79,7 +78,7 @@ export default function LogisticsPage() {
         const failures = [
           overviewResult.status === "rejected" ? "overview" : null,
           timeSeriesResult.status === "rejected" ? "time series" : null,
-          laneResult.status === "rejected" ? "lane pressure" : null,
+          laneResult.status === "rejected" ? "operational pressure" : null,
         ].filter(Boolean);
 
         if (failures.length === 3) {
@@ -146,7 +145,14 @@ export default function LogisticsPage() {
       pressure: Number(item.pressure_score.toFixed(1)),
       delay: Number(item.delay_hours.toFixed(1)),
       throughput: Number(item.throughput_pct.toFixed(1)),
-      selected: item.lane === selectedLaneData?.lane,
+      fill:
+        item.lane === selectedLaneData?.lane
+          ? "#f97316"
+          : item.pressure_score >= 70
+            ? "#fb7185"
+            : item.pressure_score >= 45
+              ? "#facc15"
+              : "#22d3ee",
     }));
   }, [filteredLanes, selectedLaneData]);
 
@@ -162,7 +168,7 @@ export default function LogisticsPage() {
       header={
         <PageHeader
           title="Logistics"
-          description="Track live transport strain with interactive lane pressure views, weekly throughput curves, and lane-level spotlight analysis."
+          description="Track live transport strain with interactive operational pressure views, weekly throughput curves, and lane-level spotlight analysis."
         />
       }
     >
@@ -215,7 +221,7 @@ export default function LogisticsPage() {
                     onChange={(value) => setFilterMode(value as FilterMode)}
                     options={[
                       { value: "all", label: "All lanes" },
-                      { value: "high-pressure", label: "High pressure" },
+                      { value: "high-pressure", label: "High operational pressure" },
                       { value: "high-delay", label: "High delay" },
                       { value: "low-throughput", label: "Low throughput" },
                     ]}
@@ -225,7 +231,7 @@ export default function LogisticsPage() {
                     value={sortMode}
                     onChange={(value) => setSortMode(value as SortMode)}
                     options={[
-                      { value: "pressure-desc", label: "Pressure" },
+                      { value: "pressure-desc", label: "Operational pressure" },
                       { value: "delay-desc", label: "Delay" },
                       { value: "throughput-desc", label: "Throughput" },
                       { value: "shipments-desc", label: "Shipments" },
@@ -245,7 +251,7 @@ export default function LogisticsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
-                  <div className="h-[320px] rounded-2xl border border-slate-800/70 bg-slate-950/55 p-4">
+                  <div className="h-80 rounded-2xl border border-slate-800/70 bg-slate-950/55 p-4">
                     <div className="mb-4 flex items-center justify-between">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
@@ -291,14 +297,30 @@ export default function LogisticsPage() {
                       <DistributionCard label="High" value={overview?.delay_distribution.high ?? 0} tone="high" />
                     </div>
                     <div className="mt-6 text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                      Lane Pressure Index
+                      Operational Pressure Index
                     </div>
-                    <div className="mt-4 h-[180px]">
+                    <div className="mt-4 h-55">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={laneChartData} margin={{ top: 0, right: 0, left: -18, bottom: 0 }}>
+                        <BarChart data={laneChartData} margin={{ top: 6, right: 4, left: 8, bottom: 8 }} barGap={10}>
                           <CartesianGrid vertical={false} stroke="rgba(148,163,184,0.08)" />
-                          <XAxis dataKey="lane" tick={{ fill: "#94a3b8", fontSize: 10 }} tickLine={false} axisLine={false} />
-                          <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} axisLine={false} width={30} />
+                          <XAxis
+                            dataKey="lane"
+                            tick={{ fill: "#94a3b8", fontSize: 10 }}
+                            tickLine={false}
+                            axisLine={false}
+                            interval={0}
+                            angle={-18}
+                            textAnchor="end"
+                            height={42}
+                          />
+                          <YAxis
+                            tick={{ fill: "#94a3b8", fontSize: 11 }}
+                            tickLine={false}
+                            axisLine={false}
+                            width={40}
+                            domain={[0, 100]}
+                            ticks={[0, 25, 50, 75, 100]}
+                          />
                           <Tooltip
                             contentStyle={{
                               background: "rgba(2,6,23,0.96)",
@@ -307,14 +329,7 @@ export default function LogisticsPage() {
                               color: "#e2e8f0",
                             }}
                           />
-                          <Bar dataKey="pressure" radius={[8, 8, 0, 0]}>
-                            {laneChartData.map((item) => (
-                              <Cell
-                                key={item.lane}
-                                fill={item.selected ? "#f97316" : item.pressure >= 70 ? "#fb7185" : item.pressure >= 45 ? "#facc15" : "#22d3ee"}
-                              />
-                            ))}
-                          </Bar>
+                          <Bar dataKey="pressure" radius={[8, 8, 0, 0]} maxBarSize={58} />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
@@ -343,7 +358,7 @@ export default function LogisticsPage() {
                   <div className="mt-1 text-sm text-slate-400">{selectedLaneData.shipment_count} shipments tracked</div>
                 </div>
 
-                <SpotlightMetric label="Pressure Score" value={selectedLaneData.pressure_score} />
+                <SpotlightMetric label="Operational Pressure" value={selectedLaneData.pressure_score} />
                 <SpotlightMetric label="Delay Hours" value={selectedLaneData.delay_hours} suffix="h" />
                 <SpotlightMetric label="Throughput" value={selectedLaneData.throughput_pct} suffix="%" invert />
 
@@ -388,7 +403,7 @@ export default function LogisticsPage() {
                           {item.origin_port} → {item.destination_port}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
-                          {item.shipment_count} shipments · lane pressure {item.pressure_score.toFixed(1)}
+                          {item.shipment_count} shipments · operational pressure {item.pressure_score.toFixed(1)}
                         </div>
                       </div>
                       <SeverityChip value={item.pressure_score} />
@@ -448,7 +463,7 @@ function PageMessage({
   isError?: boolean;
 }) {
   return (
-    <div className={`min-h-[160px] text-sm ${isError ? "text-rose-300" : "text-slate-400"} flex items-center justify-center`}>
+    <div className={`min-h-40 text-sm ${isError ? "text-rose-300" : "text-slate-400"} flex items-center justify-center`}>
       {message}
     </div>
   );

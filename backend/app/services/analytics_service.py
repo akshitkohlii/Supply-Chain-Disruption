@@ -84,8 +84,13 @@ def _filter_snapshot_docs(
         route_key = _normalize_text(doc.get("route_key") or doc.get("entity_id"))
         origin_port = _normalize_text(doc.get("origin_port"))
         destination_port = _normalize_text(doc.get("destination_port"))
+        lane_label = (
+            f"{origin_port} → {destination_port}"
+            if origin_port and destination_port
+            else None
+        )
 
-        if normalized_lane and route_key != normalized_lane:
+        if normalized_lane and normalized_lane not in {route_key, lane_label}:
             continue
 
         if normalized_port and normalized_port not in {origin_port, destination_port}:
@@ -227,17 +232,96 @@ def _analytics_time_series(snapshot_docs: List[Dict[str, Any]]) -> List[Dict[str
     return results
 
 
+def _analytics_time_series_fallback(
+    snapshot_docs: List[Dict[str, Any]],
+    forecast_series: List[Dict[str, float | str]],
+) -> List[Dict[str, float | str | int]]:
+    latest_snapshots = _latest_route_snapshots_by_key(snapshot_docs)
+    if not latest_snapshots or not forecast_series:
+        return []
+
+    divisor = len(latest_snapshots)
+    current_risk = round(
+        sum(_safe_float((doc.get("scores") or {}).get("final_risk")) for doc in latest_snapshots)
+        / divisor,
+        2,
+    )
+    weather_score = round(
+        sum(_safe_float((doc.get("scores") or {}).get("weather")) for doc in latest_snapshots)
+        / divisor,
+        2,
+    )
+    news_score = round(
+        sum(_safe_float((doc.get("scores") or {}).get("news")) for doc in latest_snapshots)
+        / divisor,
+        2,
+    )
+    congestion_score = round(
+        sum(_safe_float((doc.get("scores") or {}).get("congestion")) for doc in latest_snapshots)
+        / divisor,
+        2,
+    )
+    logistics_score = round(
+        sum(_safe_float((doc.get("scores") or {}).get("logistics")) for doc in latest_snapshots)
+        / divisor,
+        2,
+    )
+    emerging_score = round(
+        sum(_safe_float((doc.get("scores") or {}).get("emerging")) for doc in latest_snapshots)
+        / divisor,
+        2,
+    )
+
+    fallback_start = datetime.now(timezone.utc)
+    results: List[Dict[str, float | str | int]] = []
+
+    for index, point in enumerate(forecast_series[-7:]):
+        forecast_risk = round(_safe_float(point.get("forecast_risk")), 2)
+        date_value = str(
+            point.get("date")
+            or (fallback_start + timedelta(days=index)).date().isoformat()
+        )
+        day_value = str(
+            point.get("day")
+            or _short_day_label(fallback_start + timedelta(days=index))
+        )
+        results.append(
+            {
+                "day": day_value,
+                "date": date_value,
+                "current_risk": current_risk,
+                "forecast_risk": forecast_risk,
+                "drift": round(forecast_risk - current_risk, 2),
+                "weather_score": weather_score,
+                "forecast_weather_score": round(
+                    _safe_float(point.get("forecast_weather_score"), weather_score),
+                    2,
+                ),
+                "news_score": news_score,
+                "congestion_score": congestion_score,
+                "logistics_score": logistics_score,
+                "emerging_score": emerging_score,
+                "route_count": divisor,
+            }
+        )
+
+    return results
+
+
 def _weather_forecast_point(
     day_value: datetime,
     current_risk: float,
     forecast_risk: float,
+    forecast_weather_score: float = 0.0,
 ) -> Dict[str, float | str]:
     current = round(_clamp_score(current_risk), 2)
     forecast = round(_clamp_score(forecast_risk), 2)
     return {
         "day": _short_day_label(day_value),
+        "date": day_value.astimezone(timezone.utc).date().isoformat(),
         "today_baseline": current,
         "forecast_risk": forecast,
+        "forecast_weather_score": round(_clamp_score(forecast_weather_score), 2),
         "drift": round(forecast - current, 2),
     }
 
@@ -296,21 +380,30 @@ async def _fetch_port_forecasts(
 def _build_seven_day_flat_forecast(
     current_risk: float,
     forecast_risk: float,
+    forecast_weather_score: float = 0.0,
 ) -> List[Dict[str, float | str]]:
     start = datetime.now(timezone.utc)
     return [
-        _weather_forecast_point(start + timedelta(days=index), current_risk, forecast_risk)
+        _weather_forecast_point(
+            start + timedelta(days=index),
+            current_risk,
+            forecast_risk,
+            forecast_weather_score,
+        )
         for index in range(7)
     ]
 
 
-async def _seven_day_weather_forecast_series() -> List[Dict[str, float | str]]:
-    db = get_database()
-    snapshot_docs = (
-        await db.risk_snapshots.find({"entity_type": "route"})
-        .sort("snapshot_time", -1)
-        .to_list(length=5000)
-    )
+async def _seven_day_weather_forecast_series(
+    snapshot_docs: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, float | str]]:
+    if snapshot_docs is None:
+        db = get_database()
+        snapshot_docs = (
+            await db.risk_snapshots.find({"entity_type": "route"})
+            .sort("snapshot_time", -1)
+            .to_list(length=5000)
+        )
     latest_snapshots = _latest_route_snapshots_by_key(snapshot_docs)
     if not latest_snapshots:
         return []
@@ -346,6 +439,11 @@ async def _seven_day_weather_forecast_series() -> List[Dict[str, float | str]]:
         / len(latest_snapshots),
         2,
     )
+    base_current_weather = round(
+        sum(_safe_float((doc.get("scores") or {}).get("weather")) for doc in latest_snapshots)
+        / len(latest_snapshots),
+        2,
+    )
     base_ml_risk = round(
         sum(_safe_float((doc.get("scores") or {}).get("ml")) for doc in latest_snapshots)
         / len(latest_snapshots),
@@ -353,10 +451,15 @@ async def _seven_day_weather_forecast_series() -> List[Dict[str, float | str]]:
     )
 
     if not port_forecasts:
-        return _build_seven_day_flat_forecast(base_current_risk, base_ml_risk)
+        return _build_seven_day_flat_forecast(
+            base_current_risk,
+            base_ml_risk,
+            base_current_weather,
+        )
 
     today = datetime.now(timezone.utc)
     daily_buckets: List[List[float]] = [[] for _ in range(7)]
+    daily_weather_buckets: List[List[float]] = [[] for _ in range(7)]
 
     for doc in latest_snapshots:
         route_key = str(doc.get("route_key") or doc.get("entity_id") or "")
@@ -389,12 +492,24 @@ async def _seven_day_weather_forecast_series() -> List[Dict[str, float | str]]:
                 baseline_without_weather + future_weather * 0.45 + ml_uplift
             )
             daily_buckets[day_index].append(forecast_risk)
+            daily_weather_buckets[day_index].append(future_weather)
 
     results: List[Dict[str, float | str]] = []
     for day_index, values in enumerate(daily_buckets):
         day_value = today + timedelta(days=day_index)
         avg_forecast = round(sum(values) / len(values), 2) if values else base_ml_risk
-        results.append(_weather_forecast_point(day_value, base_current_risk, avg_forecast))
+        avg_forecast_weather = round(
+            sum(daily_weather_buckets[day_index]) / len(daily_weather_buckets[day_index]),
+            2,
+        ) if daily_weather_buckets[day_index] else base_current_weather
+        results.append(
+            _weather_forecast_point(
+                day_value,
+                base_current_risk,
+                avg_forecast,
+                avg_forecast_weather,
+            )
+        )
 
     return results
 
@@ -409,7 +524,7 @@ async def get_analytics_overview() -> Dict[str, float | int]:
     )
 
     latest_snapshots = _latest_route_snapshots_by_key(snapshot_docs)
-    forecast_series = await _seven_day_weather_forecast_series()
+    forecast_series = await _seven_day_weather_forecast_series(snapshot_docs)
 
     latest_forecast_point = forecast_series[-1] if forecast_series else None
 
@@ -527,7 +642,13 @@ async def get_analytics_time_series(
     )
 
     filtered_docs = _filter_snapshot_docs(snapshot_docs, port=port, lane=lane)
-    return _analytics_time_series(filtered_docs)
+    series = _analytics_time_series(filtered_docs)
+    if len(series) >= 2:
+        return series
+
+    forecast_series = await _seven_day_weather_forecast_series(filtered_docs)
+    fallback = _analytics_time_series_fallback(filtered_docs, forecast_series)
+    return fallback or series
 
 
 async def get_supplier_exposure() -> List[Dict[str, Any]]:

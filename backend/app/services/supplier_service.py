@@ -50,6 +50,7 @@ def _compute_supplier_scores(
     avg_inventory_level: float,
     avg_lead_time: float,
     shipment_share_pct: float,
+    order_value_share_pct: float,
     lead_time_pct: float,
     supplier_concentration_pct: float,
 ) -> tuple[float, float]:
@@ -71,9 +72,10 @@ def _compute_supplier_scores(
     dependency_score = round(
         min(
             100.0,
-            shipment_share_pct * 0.55
-            + lead_time_pct * 0.20
-            + supplier_concentration_pct * 0.25,
+            shipment_share_pct * 3.1
+            + order_value_share_pct * 2.4
+            + lead_time_pct * 0.16
+            + supplier_concentration_pct * 0.08,
         ),
         2,
     )
@@ -184,14 +186,25 @@ async def _aggregate_all_suppliers() -> List[Dict[str, Any]]:
                 "supplier_region": {"$first": "$supplier_region"},
                 "avg_delay_hours": {"$avg": "$delay_hours"},
                 "avg_inventory_level": {"$avg": "$inventory_level"},
-                "avg_lead_time": {"$avg": "$supplier_lead_time"},
+                "avg_lead_time": {"$avg": {"$ifNull": ["$expected_time_hours", 0]}},
                 "shipment_count": {"$sum": 1},
+                "order_value_total": {
+                    "$sum": {
+                        "$ifNull": [
+                            "$order_value",
+                            {"$ifNull": ["$order_value_usd", 0]},
+                        ]
+                    }
+                },
             }
         }
     ]
 
     raw_suppliers = await db.shipments_raw.aggregate(pipeline).to_list(None)
     total_shipments = sum(int(supplier.get("shipment_count") or 0) for supplier in raw_suppliers)
+    total_order_value = sum(
+        safe_float(supplier.get("order_value_total")) for supplier in raw_suppliers
+    )
     total_suppliers = max(len(raw_suppliers), 1)
     max_lead_time = max(
         (safe_float(supplier.get("avg_lead_time")) for supplier in raw_suppliers),
@@ -209,6 +222,11 @@ async def _aggregate_all_suppliers() -> List[Dict[str, Any]]:
         shipment_share_pct = (
             (shipment_count / total_shipments) * 100.0 if total_shipments else 0.0
         )
+        order_value_share_pct = (
+            (safe_float(supplier.get("order_value_total")) / total_order_value) * 100.0
+            if total_order_value > 0
+            else shipment_share_pct
+        )
         lead_time_pct = (
             (avg_lead / max_lead_time) * 100.0 if max_lead_time > 0 else 0.0
         )
@@ -218,6 +236,7 @@ async def _aggregate_all_suppliers() -> List[Dict[str, Any]]:
             avg_inventory_level=avg_inventory,
             avg_lead_time=avg_lead,
             shipment_share_pct=shipment_share_pct,
+            order_value_share_pct=order_value_share_pct,
             lead_time_pct=lead_time_pct,
             supplier_concentration_pct=supplier_concentration_pct,
         )

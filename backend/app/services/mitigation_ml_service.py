@@ -140,12 +140,33 @@ def classify_port_alert_kind(alert: Dict[str, Any], top_factors: List[str]) -> s
     summary = str(alert.get("summary") or "").lower()
     factor_text = " ".join(top_factors).lower()
 
-    if category == "climate" or "weather" in title or "weather" in summary:
-        return "weather"
-    if category == "geo" or "news" in title or "geopolitical" in title or "disruption headlines" in factor_text:
+    # Prefer the model's dominant factors over the coarse alert category so the
+    # explanation matches the actual driver shown to the user.
+    if (
+        "elevated disruption news pressure" in factor_text
+        or "news" in factor_text
+        or "geopolitical" in factor_text
+        or category == "geo"
+        or "news" in title
+        or "geopolitical" in title
+    ):
         return "news"
-    if category == "port" or "congestion" in title or "congestion" in summary or "high port congestion" in factor_text:
+    if (
+        "high port congestion" in factor_text
+        or "congestion" in factor_text
+        or category == "port"
+        or "congestion" in title
+        or "congestion" in summary
+    ):
         return "congestion"
+    if (
+        "elevated weather exposure" in factor_text
+        or "weather" in factor_text
+        or category == "climate"
+        or "weather" in title
+        or "weather" in summary
+    ):
+        return "weather"
     return "general"
 
 
@@ -595,6 +616,14 @@ async def build_ml_mitigation_plan(alert_id: str) -> Optional[Dict[str, Any]]:
 
     scenarios = [
         {
+            "id": "baseline",
+            "label": "Maintain current operating plan",
+            "risk_score": clamp_score(final_risk),
+            "delay_hours": round(max(1.0, predicted_delay_hours), 1),
+            "recovery_days": baseline_recovery,
+            "cost_impact": baseline_cost_percent(predicted_delay_hours, final_risk),
+        },
+        {
             "id": "reroute",
             "label": "Reroute via alternate port",
             **reroute,
@@ -611,8 +640,9 @@ async def build_ml_mitigation_plan(alert_id: str) -> Optional[Dict[str, Any]]:
         },
     ]
 
+    candidate_scenarios = [scenario for scenario in scenarios if scenario["id"] != "baseline"] or scenarios
     best = min(
-        scenarios,
+        candidate_scenarios,
         key=lambda s: s["risk_score"] + s["delay_hours"] + s["recovery_days"] * 10 + s["cost_impact"],
     )
 

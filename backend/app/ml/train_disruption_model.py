@@ -4,8 +4,8 @@ from pathlib import Path
 import joblib
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -40,9 +40,11 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     rename_map = {
         "date": "timestamp",
+        "shipment_date": "timestamp",
         "units_sold": "units_sold_7d",
         "expected_time": "expected_time_hours",
         "actual_time": "actual_time_hours",
+        "order_value_usd": "order_value",
     }
     existing = {old: new for old, new in rename_map.items() if old in df.columns}
     df = df.rename(columns=existing)
@@ -59,12 +61,21 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "product_category",
         "priority_level",
         "origin_port",
+        "origin_country",
         "destination_port",
+        "destination_country",
+        "route_key",
+        "route_distance_km",
         "transport_mode",
+        "carrier_name",
+        "sku_group",
         "expected_time_hours",
         "actual_time_hours",
         "delay_hours",
         "shipment_status",
+        "port_congestion_origin",
+        "port_congestion_destination",
+        "fuel_price_index",
         "inventory_level",
         "safety_stock_level",
         "units_sold_7d",
@@ -85,29 +96,42 @@ def create_target(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     delay = pd.to_numeric(df["delay_hours"], errors="coerce").fillna(0)
+    customs = pd.to_numeric(df["customs_clearance_hours"], errors="coerce").fillna(0)
     status = df["shipment_status"].fillna("").astype(str).str.lower()
 
-    df["target_disruption"] = ((delay >= 24) | (status == "delayed")).astype(int)
+    df["target_disruption"] = (
+        (delay >= 18)
+        | (customs >= 24)
+        | status.isin(["customs_hold", "port_hold", "delayed"])
+    ).astype(int)
     return df
 
 
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    df["route_key"] = (
-        df["origin_port"].fillna("Unknown").astype(str)
+    if "route_key" not in df.columns:
+        df["route_key"] = None
+
+    missing_route_key = df["route_key"].isna() | (df["route_key"].astype(str).str.strip() == "")
+    df.loc[missing_route_key, "route_key"] = (
+        df.loc[missing_route_key, "origin_port"].fillna("Unknown").astype(str)
         + "|"
-        + df["destination_port"].fillna("Unknown").astype(str)
+        + df.loc[missing_route_key, "destination_port"].fillna("Unknown").astype(str)
     )
 
     numeric_defaults = {
         "expected_time_hours": 0,
+        "route_distance_km": 0,
         "inventory_level": 0,
         "safety_stock_level": 1,
         "units_sold_7d": 0,
         "demand_volatility": 0,
         "order_value": 0,
         "customs_clearance_hours": 0,
+        "port_congestion_origin": 0,
+        "port_congestion_destination": 0,
+        "fuel_price_index": 0,
     }
     for col, default in numeric_defaults.items():
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default)
@@ -115,6 +139,10 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     safety_stock = df["safety_stock_level"].replace(0, 1)
     df["inventory_gap"] = df["inventory_level"] - df["safety_stock_level"]
     df["inventory_ratio"] = df["inventory_level"] / safety_stock
+    df["route_pressure"] = (
+        df["port_congestion_origin"] * 0.45
+        + df["port_congestion_destination"] * 0.55
+    )
 
     if "timestamp" in df.columns:
         ts = pd.to_datetime(df["timestamp"], errors="coerce")
@@ -136,13 +164,23 @@ def select_features(df: pd.DataFrame):
         "product_category",
         "priority_level",
         "transport_mode",
+        "carrier_name",
+        "origin_country",
+        "destination_country",
+        "sku_group",
+        "temperature_control_required",
         "expected_time_hours",
+        "route_distance_km",
         "inventory_level",
         "safety_stock_level",
         "units_sold_7d",
         "demand_volatility",
         "order_value",
         "customs_clearance_hours",
+        "port_congestion_origin",
+        "port_congestion_destination",
+        "fuel_price_index",
+        "route_pressure",
         "inventory_gap",
         "inventory_ratio",
         "month",
@@ -160,15 +198,25 @@ def select_features(df: pd.DataFrame):
         "product_category",
         "priority_level",
         "transport_mode",
+        "carrier_name",
+        "origin_country",
+        "destination_country",
+        "sku_group",
+        "temperature_control_required",
     ]
     numeric_features = [
         "expected_time_hours",
+        "route_distance_km",
         "inventory_level",
         "safety_stock_level",
         "units_sold_7d",
         "demand_volatility",
         "order_value",
         "customs_clearance_hours",
+        "port_congestion_origin",
+        "port_congestion_destination",
+        "fuel_price_index",
+        "route_pressure",
         "inventory_gap",
         "inventory_ratio",
         "month",
@@ -199,14 +247,10 @@ def build_pipeline(categorical_features, numeric_features) -> Pipeline:
         ]
     )
 
-    model = RandomForestClassifier(
-        n_estimators=250,
-        max_depth=12,
-        min_samples_split=8,
-        min_samples_leaf=3,
+    model = LogisticRegression(
+        max_iter=4000,
         random_state=42,
         class_weight="balanced",
-        n_jobs=-1,
     )
 
     return Pipeline(
@@ -276,6 +320,8 @@ def main():
 
     print("Evaluating model...")
     metrics = evaluate_model(pipeline, X_test, y_test)
+    metrics["rows"] = int(len(df))
+    metrics["positive_rate_train"] = float(y_train.mean())
     print(json.dumps(metrics, indent=2))
 
     print("Saving artifacts...")

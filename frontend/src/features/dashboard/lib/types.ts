@@ -1,6 +1,7 @@
 import type {
   ApiAlertSummary,
   ApiAnalyticsOverview,
+  ApiDashboardFilterOptions,
   ApiDashboardOverview,
   ApiEmergingSignal,
   ApiForecastPoint,
@@ -46,6 +47,7 @@ export type DashboardFiltersState = {
 
 export type DashboardDataState = {
   dashboardOverview: ApiDashboardOverview | null;
+  dashboardFilterOptions: ApiDashboardFilterOptions | null;
   alertSummary: ApiAlertSummary | null;
   alerts: AlertItem[];
 

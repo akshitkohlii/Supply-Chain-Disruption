@@ -1,7 +1,6 @@
 "use client";
 
 import { Search } from "lucide-react";
-import { REGION_OPTIONS } from "@/lib/settings";
 import GlassBox from "./GlassBox";
 import FilterBox from "./ui/FilterBox";
 
@@ -12,6 +11,8 @@ type SearchFiltersProps = {
   onRegionChange: (value: string) => void;
   businessUnit: string;
   onBusinessUnitChange: (value: string) => void;
+  regionOptions: string[];
+  businessUnitOptions: string[];
   riskLevel: string;
   onRiskLevelChange: (value: string) => void;
 };
@@ -23,6 +24,8 @@ export default function SearchFilters({
   onRegionChange,
   businessUnit,
   onBusinessUnitChange,
+  regionOptions,
+  businessUnitOptions,
   riskLevel,
   onRiskLevelChange,
 }: SearchFiltersProps) {
@@ -42,14 +45,14 @@ export default function SearchFilters({
       <FilterBox
         label="Region"
         value={region}
-        options={[...REGION_OPTIONS]}
+        options={regionOptions}
         onChange={onRegionChange}
       />
 
       <FilterBox
         label="Business Unit"
         value={businessUnit}
-        options={["All Units", "Global Ops", "Logistics", "Risk"]}
+        options={businessUnitOptions}
         onChange={onBusinessUnitChange}
       />
 

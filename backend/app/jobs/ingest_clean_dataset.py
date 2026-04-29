@@ -14,16 +14,13 @@ BATCH_SIZE = 1000
 BASE_DIR = Path(__file__).resolve().parents[2]
 RAW_DATA_DIR = BASE_DIR / "data" / "raw"
 DEFAULT_CSV_PATH = RAW_DATA_DIR / "scdews_final_schema_dataset.csv"
-FALLBACK_CSV_PATH = RAW_DATA_DIR / "clean_dataset_final.csv"
 
 
 def resolve_csv_path() -> Path:
     configured = os.getenv("SHIPMENTS_CSV_PATH")
     if configured:
         return Path(configured).expanduser().resolve()
-    if DEFAULT_CSV_PATH.exists():
-        return DEFAULT_CSV_PATH
-    return FALLBACK_CSV_PATH
+    return DEFAULT_CSV_PATH
 
 
 def _null_if_empty(value):
@@ -48,6 +45,7 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     rename_map = {
         "date": "timestamp",
+        "shipment_date": "timestamp",
         "units_sold": "units_sold_7d",
         "expected_time": "expected_time_hours",
         "actual_time": "actual_time_hours",

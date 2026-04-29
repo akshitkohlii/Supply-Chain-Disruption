@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bird } from "lucide-react";
-import { navItems } from "@/lib/dashboard-data";
+import { navItems } from "@/lib/navigation";
 
 export default function Sidebar() {
   const pathname = usePathname();

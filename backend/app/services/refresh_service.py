@@ -20,6 +20,8 @@ from app.services.signal_service import (
 _refresh_lock = asyncio.Lock()
 _last_news_refresh_at: datetime | None = None
 _last_weather_refresh_at: datetime | None = None
+ACTIVE_SHIPMENT_STATUSES = {"in_transit", "customs_hold", "port_hold"}
+REFRESH_STATE_SETTINGS_ID = "derived-signal-refresh-state"
 
 
 def _clamp_score(value: float) -> int:
@@ -31,6 +33,53 @@ def _normalize_str(value: Any) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _coerce_utc_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    return None
+
+
+async def _load_refresh_state() -> Dict[str, datetime | None]:
+    db = get_database()
+    doc = await db.app_settings.find_one({"_id": REFRESH_STATE_SETTINGS_ID}) or {}
+    return {
+        "last_news_refresh_at": _coerce_utc_datetime(doc.get("last_news_refresh_at")),
+        "last_weather_refresh_at": _coerce_utc_datetime(doc.get("last_weather_refresh_at")),
+    }
+
+
+async def _ensure_refresh_state_loaded() -> None:
+    global _last_news_refresh_at, _last_weather_refresh_at
+    if _last_news_refresh_at is not None or _last_weather_refresh_at is not None:
+        return
+
+    state = await _load_refresh_state()
+    _last_news_refresh_at = state["last_news_refresh_at"]
+    _last_weather_refresh_at = state["last_weather_refresh_at"]
+
+
+async def _persist_refresh_state(
+    *,
+    last_news_refresh_at: datetime | None = None,
+    last_weather_refresh_at: datetime | None = None,
+) -> None:
+    db = get_database()
+    update_fields: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
+
+    if last_news_refresh_at is not None:
+        update_fields["last_news_refresh_at"] = last_news_refresh_at
+    if last_weather_refresh_at is not None:
+        update_fields["last_weather_refresh_at"] = last_weather_refresh_at
+
+    await db.app_settings.update_one(
+        {"_id": REFRESH_STATE_SETTINGS_ID},
+        {"$set": update_fields},
+        upsert=True,
+    )
 
 
 def _port_name_variants(port_name: Optional[str]) -> List[str]:
@@ -119,11 +168,18 @@ async def refresh_routes_master() -> Dict[str, Any]:
 
     pipeline = [
         {
+            "$match": {
+                "shipment_status": {"$in": sorted(ACTIVE_SHIPMENT_STATUSES)}
+            }
+        },
+        {
             "$group": {
                 "_id": {
+                    "route_key": "$route_key",
                     "origin_port": "$origin_port",
                     "destination_port": "$destination_port",
                 },
+                "route_key": {"$first": "$route_key"},
                 "shipment_count": {"$sum": 1},
                 "avg_delay_hours": {"$avg": {"$ifNull": ["$delay_hours", 0]}},
                 "avg_expected_time_hours": {"$avg": {"$ifNull": ["$expected_time_hours", 0]}},
@@ -134,6 +190,7 @@ async def refresh_routes_master() -> Dict[str, Any]:
                 "avg_safety_stock_level": {"$avg": {"$ifNull": ["$safety_stock_level", 0]}},
                 "avg_units_sold_7d": {"$avg": {"$ifNull": ["$units_sold_7d", 0]}},
                 "avg_demand_volatility": {"$avg": {"$ifNull": ["$demand_volatility", 0]}},
+                "route_distance_km": {"$avg": {"$ifNull": ["$route_distance_km", 0]}},
                 "product_categories": {"$addToSet": "$product_category"},
                 "business_units": {"$addToSet": "$business_unit"},
                 "priority_levels": {"$addToSet": "$priority_level"},
@@ -149,7 +206,7 @@ async def refresh_routes_master() -> Dict[str, Any]:
     for doc in docs:
         origin = _normalize_str((doc.get("_id") or {}).get("origin_port"))
         destination = _normalize_str((doc.get("_id") or {}).get("destination_port"))
-        key = _route_key(origin, destination)
+        key = _normalize_str(doc.get("route_key")) or _route_key(origin, destination)
 
         output_docs.append(
             {
@@ -167,6 +224,7 @@ async def refresh_routes_master() -> Dict[str, Any]:
                 "avg_safety_stock_level": round(float(doc.get("avg_safety_stock_level") or 0), 2),
                 "avg_units_sold_7d": round(float(doc.get("avg_units_sold_7d") or 0), 2),
                 "avg_demand_volatility": round(float(doc.get("avg_demand_volatility") or 0), 4),
+                "route_distance_km": round(float(doc.get("route_distance_km") or 0), 2),
                 "product_categories": sorted([x for x in (doc.get("product_categories") or []) if x is not None]),
                 "business_units": sorted([x for x in (doc.get("business_units") or []) if x is not None]),
                 "priority_levels": sorted([x for x in (doc.get("priority_levels") or []) if x is not None]),
@@ -230,7 +288,7 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
         emerging_impact = await get_route_emerging_impact(route)
         emerging_score = int(emerging_impact.get("score", 0) or 0)
 
-        final_risk = _clamp_score(
+        blended_final_risk = _clamp_score(
             0.13 * weather_score
             + 0.18 * news_score
             + 0.18 * logistics
@@ -238,6 +296,13 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
             + 0.21 * ml_risk_score
             + 0.12 * emerging_score
         )
+        ml_supported_floor = _clamp_score(
+            0.60 * ml_risk_score
+            + 0.18 * congestion_score
+            + 0.12 * logistics
+            + 0.10 * max(weather_score, news_score, emerging_score)
+        )
+        final_risk = max(blended_final_risk, ml_supported_floor)
 
         drivers = []
         if weather_score >= 40:
@@ -290,6 +355,7 @@ async def refresh_derived_state() -> Dict[str, Any]:
     global _last_news_refresh_at, _last_weather_refresh_at
 
     async with _refresh_lock:
+        await _ensure_refresh_state_loaded()
         result: Dict[str, Any] = {"started_at": datetime.now(timezone.utc).isoformat()}
         result["routes_master"] = await refresh_routes_master()
         result["port_congestion"] = await ingest_port_congestion_signals()
@@ -310,6 +376,7 @@ async def refresh_derived_state() -> Dict[str, Any]:
             try:
                 result["weather_signals"] = await ingest_weather_signals_for_all_ports()
                 _last_weather_refresh_at = now
+                await _persist_refresh_state(last_weather_refresh_at=now)
             except Exception as exc:
                 result["weather_signals_error"] = str(exc)
         else:
@@ -319,6 +386,7 @@ async def refresh_derived_state() -> Dict[str, Any]:
             try:
                 result["news_signals"] = await ingest_news_signals_for_all_ports()
                 _last_news_refresh_at = now
+                await _persist_refresh_state(last_news_refresh_at=now)
             except Exception as exc:
                 result["news_signals_error"] = str(exc)
         else:

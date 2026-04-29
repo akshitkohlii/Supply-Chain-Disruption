@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +11,30 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 MODEL_PATH = BASE_DIR / "data" / "models" / "emerging_signal_model.pkl"
 
 _model = None
+_CACHE_TTL_SECONDS = 20
+_emerging_cache: dict[str, tuple[datetime, Any]] = {}
+
+
+def _cache_key(limit: int, relevant_only: bool, source_type: Optional[str]) -> str:
+    return (
+        f"signals:limit={limit}|relevant_only={int(relevant_only)}|source_type={source_type or ''}"
+    )
+
+
+def _get_cached(key: str):
+    cached = _emerging_cache.get(key)
+    if not cached:
+        return None
+    cached_at, value = cached
+    if datetime.now(timezone.utc) - cached_at >= timedelta(seconds=_CACHE_TTL_SECONDS):
+        _emerging_cache.pop(key, None)
+        return None
+    return value
+
+
+def _set_cached(key: str, value: Any):
+    _emerging_cache[key] = (datetime.now(timezone.utc), value)
+    return value
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -140,6 +164,32 @@ def _heuristic_signal_probability(signal: Dict[str, Any]) -> float:
             / 100.0,
         )
 
+    if source_type == "news":
+        keyword_hits = _safe_float(signal.get("keyword_hits"), 0)
+        disruption_terms = _safe_float(signal.get("contains_disruption_terms"), 0)
+        sentiment_score = abs(_safe_float(signal.get("sentiment_score"), 0))
+        published_age = _safe_float(signal.get("published_age_hours"), 0)
+        recency_score = max(0.0, 100.0 - min(100.0, (published_age / 48.0) * 100.0))
+        port_context_hits = _safe_float(signal.get("port_context_hits"), 0)
+        exact_port_mentions = _safe_float(signal.get("exact_port_mentions"), 0)
+        hotspot_article_count = _safe_float(signal.get("hotspot_article_count"), 0)
+        relevance_score = _safe_float(signal.get("relevance_score"), 0)
+
+        return min(
+            0.92,
+            (
+                min(100.0, keyword_hits * 10.0) * 0.18
+                + min(100.0, disruption_terms * 100.0) * 0.12
+                + min(100.0, sentiment_score * 100.0) * 0.08
+                + recency_score * 0.10
+                + min(100.0, port_context_hits * 14.0) * 0.18
+                + min(100.0, exact_port_mentions * 35.0) * 0.20
+                + min(100.0, hotspot_article_count * 20.0) * 0.04
+                + min(100.0, relevance_score * 8.0) * 0.10
+            )
+            / 100.0,
+        )
+
     keyword_hits = _safe_float(signal.get("keyword_hits"), 0)
     disruption_terms = _safe_float(signal.get("contains_disruption_terms"), 0)
     sentiment_score = abs(_safe_float(signal.get("sentiment_score"), 0))
@@ -174,9 +224,29 @@ def predict_emerging_signal(signal: Dict[str, Any]) -> Dict[str, Any]:
     raw_probability = float(model.predict_proba(features)[0][1])
     probability = calibrate_signal_probability(signal, raw_probability)
     emerging_score = _clamp_score(probability * 100)
+    source_type = str(signal.get("source_type") or "").lower()
+
+    relevance_threshold = 0.5
+    if source_type == "news":
+        relevance_threshold = 0.64
+
+    is_relevant = probability >= relevance_threshold
+    if source_type == "news":
+        exact_port_mentions = _safe_float(signal.get("exact_port_mentions"), 0)
+        port_context_hits = _safe_float(signal.get("port_context_hits"), 0)
+        keyword_hits = _safe_float(signal.get("keyword_hits"), 0)
+        strong_disruption_hits = _safe_float(signal.get("strong_disruption_hits"), 0)
+        hotspot_article_count = _safe_float(signal.get("hotspot_article_count"), 0)
+
+        has_news_context = (
+            exact_port_mentions >= 1
+            or (port_context_hits >= 2 and keyword_hits >= 2 and strong_disruption_hits >= 1)
+            or (hotspot_article_count >= 1 and keyword_hits >= 2)
+        )
+        is_relevant = is_relevant and has_news_context
 
     return {
-        "is_relevant": probability >= 0.5,
+        "is_relevant": is_relevant,
         "relevance_probability": round(probability, 4),
         "emerging_score": emerging_score,
         "risk_type": derive_risk_type(signal),
@@ -194,6 +264,11 @@ def _news_signal_to_model_input(signal: Dict[str, Any]) -> Dict[str, Any]:
         "port_name": signal.get("port_name") or signal.get("entity_id") or "",
         "country": signal.get("country") or "",
         "keyword_hits": _safe_float(features.get("keyword_hits"), 0),
+        "strong_disruption_hits": _safe_float(features.get("strong_disruption_hits"), 0),
+        "port_context_hits": _safe_float(features.get("port_context_hits"), 0),
+        "exact_port_mentions": _safe_float(features.get("exact_port_mentions"), 0),
+        "hotspot_article_count": _safe_float(features.get("hotspot_article_count"), 0),
+        "relevance_score": _safe_float(features.get("relevance_score"), 0),
         "sentiment_score": _safe_float(features.get("sentiment_score"), 0),
         "contains_disruption_terms": _safe_float(features.get("contains_disruption_terms"), 0),
         "published_age_hours": _safe_float(features.get("published_age_hours"), 0),
@@ -355,6 +430,11 @@ async def get_emerging_signals(
     relevant_only: bool = True,
     source_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    cache_key = _cache_key(limit, relevant_only, source_type)
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     db = get_database()
 
     query: Dict[str, Any] = {}
@@ -370,7 +450,7 @@ async def get_emerging_signals(
         .to_list(length=limit)
     )
 
-    return _serialize_docs(docs)
+    return _set_cached(cache_key, _serialize_docs(docs))
 
 
 def _source_weight(source_type: str) -> float:

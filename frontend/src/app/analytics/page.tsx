@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import {
   Area,
   AreaChart,
@@ -144,19 +145,19 @@ export default function AnalyticsPage() {
     if (!timeSeriesRows.length) {
       return [
         { label: "Weather", value: 0, tone: "low" as const },
-        { label: "News", value: 0, tone: "low" as const },
         { label: "Congestion", value: 0, tone: "low" as const },
+        { label: "Logistics", value: 0, tone: "low" as const },
       ];
     }
 
     const maxWeather = Math.max(...timeSeriesRows.map((item) => item.weatherScore));
-    const maxNews = Math.max(...timeSeriesRows.map((item) => item.newsScore));
     const maxCongestion = Math.max(...timeSeriesRows.map((item) => item.congestionScore));
+    const maxLogistics = Math.max(...timeSeriesRows.map((item) => item.logisticsScore));
 
     return [
       { label: "Weather Peak", value: maxWeather, tone: getTone(maxWeather) },
-      { label: "News Peak", value: maxNews, tone: getTone(maxNews) },
       { label: "Congestion Peak", value: maxCongestion, tone: getTone(maxCongestion) },
+      { label: "Logistics Peak", value: maxLogistics, tone: getTone(maxLogistics) },
     ];
   }, [timeSeriesRows]);
 
@@ -197,16 +198,77 @@ export default function AnalyticsPage() {
           />
         </div>
 
+        <Panel title="Analysis Focus Controls">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-4">
+            <FocusCard
+              title="Forecast Signals"
+              value={`${avgForecast}`}
+              subtitle="Observed vs modeled route movement"
+              active={focusMode === "forecast"}
+              tone="high"
+              onClick={() =>
+                setFocusMode((prev) => (prev === "forecast" ? "all" : "forecast"))
+              }
+            />
+            <FocusCard
+              title="Supplier Exposure"
+              value={`${avgSupplierRisk}`}
+              subtitle="Risk and dependency concentration"
+              active={focusMode === "suppliers"}
+              tone="medium"
+              onClick={() =>
+                setFocusMode((prev) => (prev === "suppliers" ? "all" : "suppliers"))
+              }
+            />
+            <FocusCard
+              title="Logistics Pressure"
+              value={`${avgDelay}h`}
+              subtitle="Lane delay and throughput strain"
+              active={focusMode === "logistics"}
+              tone="low"
+              onClick={() =>
+                setFocusMode((prev) => (prev === "logistics" ? "all" : "logistics"))
+              }
+            />
+
+            <div className="rounded-2xl border border-slate-800/80 bg-slate-950/45 p-4">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                Active Focus
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-sm text-slate-300 capitalize">
+                  {focusMode === "all" ? "All analytics views" : focusMode}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFocusMode("all");
+                    setSelectedPort("");
+                    setSelectedLane("");
+                  }}
+                  className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-700 hover:text-white"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+        </Panel>
+
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-          <Panel title="Risk Snapshot Time Series" className="xl:col-span-8">
+          <Panel
+            title="Risk Snapshot Time Series"
+            className="xl:col-span-8"
+            bodyClassName="h-full"
+          >
             {isLoading ? (
-              <AnalyticsEmptyState message="Loading time-series analysis..." />
+              <AnalyticsEmptyState message="Loading time-series analysis..." isLoading />
             ) : error ? (
               <AnalyticsEmptyState message={error} isError />
             ) : !timeSeriesRows.length ? (
               <AnalyticsEmptyState message="No time-series data available yet." />
             ) : (
-              <div className="space-y-4">
+              <div className="flex h-full flex-col gap-4">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
                   <label className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-3">
                     <div className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-500">
@@ -299,116 +361,66 @@ export default function AnalyticsPage() {
                       <Area type="monotone" dataKey="currentRisk" stroke="#38bdf8" strokeWidth={2} fill="url(#riskSeriesFill)" />
                       <Line type="monotone" dataKey="forecastRisk" stroke="#f97316" strokeWidth={2} dot={false} />
                       <Line type="monotone" dataKey="weatherScore" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
-                      <Line type="monotone" dataKey="newsScore" stroke="#facc15" strokeWidth={1.5} dot={false} />
                       <Line type="monotone" dataKey="congestionScore" stroke="#22d3ee" strokeWidth={1.5} dot={false} />
+                      <Line type="monotone" dataKey="logisticsScore" stroke="#34d399" strokeWidth={1.5} dot={false} />
                     </AreaChart>
                   </ResponsiveContainer>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                      Driver Mix
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {[
-                        { label: "Weather", value: latestValue(timeSeriesRows, "weatherScore") },
-                        { label: "News", value: latestValue(timeSeriesRows, "newsScore") },
-                        { label: "Congestion", value: latestValue(timeSeriesRows, "congestionScore") },
-                        { label: "Logistics", value: latestValue(timeSeriesRows, "logisticsScore") },
-                        { label: "Emerging", value: latestValue(timeSeriesRows, "emergingScore") },
-                      ].map((item) => (
-                        <MiniMetric key={item.label} label={item.label} value={`${item.value.toFixed(1)}`} raw={item.value} />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                      Daily Analysis Table
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {timeSeriesRows.slice(-5).reverse().map((item) => (
-                        <div
-                          key={item.date}
-                          className="rounded-xl border border-slate-800/70 bg-slate-950/55 p-3"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium text-white">{item.label}</div>
-                              <div className="text-xs text-slate-500">{item.route_count} active routes sampled</div>
-                            </div>
-                            <DriftBadge value={item.driftValue} />
-                          </div>
-                          <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
-                            <div>Current: <span className="text-slate-200">{item.currentRisk}</span></div>
-                            <div>Forecast: <span className="text-slate-200">{item.forecastRisk}</span></div>
-                            <div>Weather: <span className="text-slate-200">{item.weatherScore}</span></div>
-                            <div>News: <span className="text-slate-200">{item.newsScore}</span></div>
-                            <div>Congestion: <span className="text-slate-200">{item.congestionScore}</span></div>
-                            <div>Emerging: <span className="text-slate-200">{item.emergingScore}</span></div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
           </Panel>
 
-          <Panel title="Analysis Focus Controls" className="xl:col-span-4">
-            <div className="space-y-3">
-              <FocusCard
-                title="Forecast Signals"
-                value={`${avgForecast}`}
-                subtitle="Observed vs modeled route movement"
-                active={focusMode === "forecast"}
-                tone="high"
-                onClick={() =>
-                  setFocusMode((prev) => (prev === "forecast" ? "all" : "forecast"))
-                }
-              />
-              <FocusCard
-                title="Supplier Exposure"
-                value={`${avgSupplierRisk}`}
-                subtitle="Risk and dependency concentration"
-                active={focusMode === "suppliers"}
-                tone="medium"
-                onClick={() =>
-                  setFocusMode((prev) => (prev === "suppliers" ? "all" : "suppliers"))
-                }
-              />
-              <FocusCard
-                title="Logistics Pressure"
-                value={`${avgDelay}h`}
-                subtitle="Lane delay and throughput strain"
-                active={focusMode === "logistics"}
-                tone="low"
-                onClick={() =>
-                  setFocusMode((prev) => (prev === "logistics" ? "all" : "logistics"))
-                }
-              />
-
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-950/45 p-4">
+          <Panel title="Snapshot Sidecards" className="xl:col-span-4" bodyClassName="h-full">
+            <div className="grid grid-cols-1 gap-3">
+              <div className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                  Active Focus
+                  Driver Mix
                 </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-sm text-slate-300 capitalize">
-                    {focusMode === "all" ? "All analytics views" : focusMode}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFocusMode("all");
-                      setSelectedPort("");
-                      setSelectedLane("");
-                    }}
-                    className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-700 hover:text-white"
-                  >
-                    Reset
-                  </button>
+                <div className="mt-4 space-y-3">
+                  {[
+                    { label: "Weather", value: latestValue(timeSeriesRows, "weatherScore") },
+                    { label: "News", value: latestValue(timeSeriesRows, "newsScore") },
+                    { label: "Congestion", value: latestValue(timeSeriesRows, "congestionScore") },
+                    { label: "Logistics", value: latestValue(timeSeriesRows, "logisticsScore") },
+                    { label: "Emerging", value: latestValue(timeSeriesRows, "emergingScore") },
+                  ].map((item) => (
+                    <MiniMetric
+                      key={item.label}
+                      label={item.label}
+                      value={`${item.value.toFixed(1)}`}
+                      raw={item.value}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex h-75 flex-col rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                  Daily Analysis Table
+                </div>
+                <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
+                  {timeSeriesRows.slice(-5).reverse().map((item) => (
+                    <div
+                      key={item.date}
+                      className="rounded-xl border border-slate-800/70 bg-slate-950/55 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-white">{item.label}</div>
+                          <div className="text-xs text-slate-500">{item.route_count} active routes sampled</div>
+                        </div>
+                        <DriftBadge value={item.driftValue} />
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                        <div>Current: <span className="text-slate-200">{item.currentRisk}</span></div>
+                        <div>Forecast: <span className="text-slate-200">{item.forecastRisk}</span></div>
+                        <div>Weather: <span className="text-slate-200">{item.weatherScore}</span></div>
+                        <div>News: <span className="text-slate-200">{item.newsScore}</span></div>
+                        <div>Congestion: <span className="text-slate-200">{item.congestionScore}</span></div>
+                        <div>Emerging: <span className="text-slate-200">{item.emergingScore}</span></div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -475,10 +487,42 @@ function latestValue(
 function AnalyticsEmptyState({
   message,
   isError = false,
+  isLoading = false,
 }: {
   message: string;
   isError?: boolean;
+  isLoading?: boolean;
 }) {
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[220px] items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, y: 8, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          className="relative overflow-hidden rounded-[24px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.14),transparent_40%),linear-gradient(180deg,rgba(2,6,23,0.96),rgba(15,23,42,0.84))] px-8 py-9 text-center shadow-[0_20px_70px_rgba(2,132,199,0.12)]"
+        >
+          <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-transparent" />
+          <div className="flex flex-col items-center gap-4">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1.1, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
+              className="relative h-12 w-12"
+            >
+              <div className="absolute inset-0 rounded-full border-2 border-slate-700/80" />
+              <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-cyan-300 border-r-cyan-400/70 shadow-[0_0_20px_rgba(34,211,238,0.32)]" />
+            </motion.div>
+
+            <div className="space-y-1.5">
+              <div className="text-base font-semibold text-white">Loading analytics</div>
+              <div className="max-w-xs text-sm text-slate-300">{message}</div>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className={`flex min-h-[220px] items-center justify-center text-sm ${isError ? "text-rose-300" : "text-slate-400"}`}>
       {message}

@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.database import get_database
+from app.services.dashboard_service import clear_dashboard_overview_cache
 from app.services.port_service import get_port_by_name
 
 ALERT_THRESHOLD_SETTINGS_ID = "alert-threshold-settings"
@@ -9,6 +10,29 @@ DEFAULT_ALERT_THRESHOLDS = {
     "critical_risk_threshold": 70,
     "warning_risk_threshold": 40,
 }
+ROUTE_ALERT_MIN_RISK = 50
+_CACHE_TTL_SECONDS = 20
+_alert_cache: dict[str, tuple[datetime, Any]] = {}
+
+
+def _get_cached(key: str):
+    cached = _alert_cache.get(key)
+    if not cached:
+        return None
+    cached_at, value = cached
+    if datetime.now(timezone.utc) - cached_at >= timedelta(seconds=_CACHE_TTL_SECONDS):
+        _alert_cache.pop(key, None)
+        return None
+    return value
+
+
+def _set_cached(key: str, value: Any):
+    _alert_cache[key] = (datetime.now(timezone.utc), value)
+    return value
+
+
+def _clear_alert_cache():
+    _alert_cache.clear()
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -27,6 +51,13 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _first_present_score(*values: Any) -> int:
+    for value in values:
+        if value is not None:
+            return _safe_int(value)
+    return 0
 
 
 def _clamp_threshold(value: Any, fallback: int) -> int:
@@ -124,6 +155,23 @@ def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
         or doc.get("location")
         or ""
     )
+    risk_score = _first_present_score(scores.get("final_risk"), doc.get("risk_score"))
+    weather_score = _first_present_score(scores.get("weather"), doc.get("weather_score"))
+    news_score = _first_present_score(scores.get("news"), doc.get("news_score"))
+    logistics_score = _first_present_score(
+        scores.get("logistics"),
+        doc.get("logistics_score"),
+    )
+    congestion_score = _first_present_score(
+        scores.get("congestion"),
+        doc.get("congestion_score"),
+    )
+    emerging_score = _first_present_score(
+        scores.get("emerging"),
+        doc.get("emerging_score"),
+    )
+    final_risk = _first_present_score(scores.get("final_risk"), doc.get("final_risk"))
+    ml_score = _first_present_score(scores.get("ml"), doc.get("ml_risk_score"))
 
     return {
         "_id": str(doc.get("_id")) if doc.get("_id") is not None else None,
@@ -156,21 +204,21 @@ def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
         "business_unit": doc.get("business_unit"),
         "supplier_name": doc.get("supplier_name"),
 
-        "risk_score": _safe_int(scores.get("final_risk")) or _safe_int(doc.get("risk_score")),
-        "weather_score": _safe_int(scores.get("weather")) or _safe_int(doc.get("weather_score")),
-        "news_score": _safe_int(scores.get("news")) or _safe_int(doc.get("news_score")),
-        "logistics_score": _safe_int(scores.get("logistics")) or _safe_int(doc.get("logistics_score")),
-        "congestion_score": _safe_int(scores.get("congestion")) or _safe_int(doc.get("congestion_score")),
-        "emerging_score": _safe_int(scores.get("emerging")) or _safe_int(doc.get("emerging_score")),
-        "final_risk": _safe_int(scores.get("final_risk")) or _safe_int(doc.get("final_risk")),
+        "risk_score": risk_score,
+        "weather_score": weather_score,
+        "news_score": news_score,
+        "logistics_score": logistics_score,
+        "congestion_score": congestion_score,
+        "emerging_score": emerging_score,
+        "final_risk": final_risk,
         "scores": {
-            "weather": _safe_int(scores.get("weather")) or _safe_int(doc.get("weather_score")),
-            "news": _safe_int(scores.get("news")) or _safe_int(doc.get("news_score")),
-            "logistics": _safe_int(scores.get("logistics")) or _safe_int(doc.get("logistics_score")),
-            "congestion": _safe_int(scores.get("congestion")) or _safe_int(doc.get("congestion_score")),
-            "emerging": _safe_int(scores.get("emerging")) or _safe_int(doc.get("emerging_score")),
-            "final_risk": _safe_int(scores.get("final_risk")) or _safe_int(doc.get("final_risk")),
-            "ml": _safe_int(scores.get("ml")) or _safe_int(doc.get("ml_risk_score")),
+            "weather": weather_score,
+            "news": news_score,
+            "logistics": logistics_score,
+            "congestion": congestion_score,
+            "emerging": emerging_score,
+            "final_risk": final_risk,
+            "ml": ml_score,
         },
         "ml_prediction": {
             "disruption_probability": (
@@ -213,6 +261,10 @@ def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
 def _should_create_alert(route: Dict[str, Any], thresholds: Dict[str, int]) -> bool:
     scores = route.get("scores", {}) or {}
     final_risk = _safe_float(scores.get("final_risk"))
+    entity_type = str(route.get("entity_type") or "route")
+
+    if entity_type == "route" and final_risk < ROUTE_ALERT_MIN_RISK:
+        return False
 
     return _get_alert_level_from_score(_safe_int(final_risk), thresholds) != "stable"
 
@@ -230,9 +282,32 @@ def _classify_alert_category(route: Dict[str, Any]) -> str:
     news = _safe_float(scores.get("news"))
     logistics = _safe_float(scores.get("logistics"))
     congestion = _safe_float(scores.get("congestion"))
+    ml = _safe_float(scores.get("ml"))
+
+    if ml >= 55 and ml >= max(weather, news, logistics, congestion):
+        return "logistics"
 
     top_score = max(weather, news, logistics, congestion)
 
+    if top_score == weather:
+        return "climate"
+    if top_score == news:
+        return "geo"
+    if top_score == congestion:
+        return "port"
+    return "logistics"
+
+
+def _classify_port_alert_category_from_scores(scores: Dict[str, Any]) -> str:
+    weather = _safe_float(scores.get("weather"))
+    news = _safe_float(scores.get("news"))
+    congestion = _safe_float(scores.get("congestion"))
+    emerging = _safe_float(scores.get("emerging"))
+
+    top_score = max(weather, news, congestion, emerging)
+
+    if top_score <= 0:
+        return "logistics"
     if top_score == weather:
         return "climate"
     if top_score == news:
@@ -246,6 +321,12 @@ def _build_alert_title(route: Dict[str, Any], category: str) -> str:
     destination_port = route.get("destination_port") or "Unknown destination"
     origin_port = route.get("origin_port") or "Unknown origin"
     supplier_name = route.get("supplier_name") or "Supplier"
+    scores = route.get("scores", {}) or {}
+    ml = _safe_int(scores.get("ml"))
+    top_drivers = list(route.get("top_drivers") or [])
+
+    if "ml" in top_drivers or ml >= 55:
+        return f"Route disruption risk on {origin_port} → {destination_port}"
 
     if category == "climate":
         return f"Weather disruption risk near {destination_port}"
@@ -260,11 +341,27 @@ def _build_alert_title(route: Dict[str, Any], category: str) -> str:
 
 def _build_alert_summary(route: Dict[str, Any], category: str) -> str:
     scores = route.get("scores", {}) or {}
+    ml_prediction = route.get("ml_prediction") or {}
     weather = _safe_int(scores.get("weather"))
     news = _safe_int(scores.get("news"))
     logistics = _safe_int(scores.get("logistics"))
     congestion = _safe_int(scores.get("congestion"))
+    ml = _safe_int(scores.get("ml"))
     final_risk = _safe_int(scores.get("final_risk"))
+    predicted_delay_hours = ml_prediction.get("predicted_delay_hours")
+    top_factors = list(ml_prediction.get("top_factors") or [])
+
+    if ml >= 55:
+        delay_text = (
+            f" Predicted disruption delay {round(_safe_float(predicted_delay_hours), 1)} hours."
+            if predicted_delay_hours is not None
+            else ""
+        )
+        factor_text = f" Key ML factors: {', '.join(top_factors[:3])}." if top_factors else ""
+        return (
+            f"ML-backed route disruption pressure is elevated. "
+            f"ML score {ml}, overall route risk {final_risk}.{delay_text}{factor_text}"
+        )
 
     if category == "climate":
         return f"Elevated weather risk detected. Weather score {weather}, overall route risk {final_risk}."
@@ -330,7 +427,10 @@ def _build_alert_doc(route: Dict[str, Any], thresholds: Dict[str, int]) -> Dict[
         "summary": _build_alert_summary(route, category),
         "origin_port": origin_port,
         "destination_port": destination_port,
-        "business_unit": route.get("business_unit"),
+        "business_unit": (
+            route.get("business_unit")
+            or ((route.get("business_units") or [None])[0])
+        ),
         "supplier_name": route.get("supplier_name"),
         "scores": {
             "weather": _safe_int(scores.get("weather")),
@@ -406,6 +506,48 @@ def _build_raw_port_signal_alert_summary(signal: Dict[str, Any], source_type: st
     )
     source_label = source_type.capitalize()
     return f"{source_label} signal detected. {description}. Severity {severity}."
+
+
+def _build_port_alert_title_from_scores(port_name: str, category: str) -> str:
+    if category == "climate":
+        return f"Weather disruption signal near {port_name}"
+    if category == "geo":
+        return f"News pressure rising near {port_name}"
+    if category == "port":
+        return f"Port congestion building at {port_name}"
+    return f"Port risk signal at {port_name}"
+
+
+def _build_port_alert_summary_from_scores(
+    port_name: str,
+    scores: Dict[str, Any],
+    category: str,
+) -> str:
+    weather = _safe_int(scores.get("weather"))
+    news = _safe_int(scores.get("news"))
+    congestion = _safe_int(scores.get("congestion"))
+    emerging = _safe_int(scores.get("emerging"))
+    final_risk = _safe_int(scores.get("final_risk"))
+
+    if category == "climate":
+        return (
+            f"Weather-driven disruption pressure is elevated near {port_name}. "
+            f"Weather score {weather}, overall port risk {final_risk}."
+        )
+    if category == "geo":
+        return (
+            f"News and geopolitical disruption signals are elevated near {port_name}. "
+            f"News score {news}, overall port risk {final_risk}."
+        )
+    if category == "port":
+        return (
+            f"Port congestion pressure is elevated near {port_name}. "
+            f"Congestion score {congestion}, overall port risk {final_risk}."
+        )
+    return (
+        f"Combined port disruption signals detected near {port_name}. "
+        f"Weather {weather}, news {news}, congestion {congestion}, emerging {emerging}, final risk {final_risk}."
+    )
 
 
 def _build_raw_port_signal_alert_doc(
@@ -548,6 +690,56 @@ async def _latest_port_signal_scores(port_name: Optional[str]) -> Dict[str, int]
     }
 
 
+async def _latest_port_emerging_impact(port_name: Optional[str]) -> Dict[str, Any]:
+    if not port_name:
+        return {"score": 0, "top_ports": [], "signals": []}
+
+    db = get_database()
+    variants = _port_name_variants(port_name)
+    query = {
+        "is_relevant": True,
+        "$or": [
+            {"port_name": {"$in": variants}},
+            {"location_name": {"$in": variants}},
+            {"entity_id": {"$in": variants}},
+        ],
+    }
+
+    docs = (
+        await db.emerging_signals.find(query)
+        .sort([("emerging_score", -1), ("updated_at", -1), ("created_at", -1)])
+        .to_list(length=3)
+    )
+
+    if not docs:
+        return {"score": 0, "top_ports": [port_name], "signals": []}
+
+    signals = []
+    top_score = 0
+    for doc in docs:
+        emerging_score = _safe_int(doc.get("emerging_score") or doc.get("impact_score"))
+        impact_score = _safe_int(doc.get("impact_score") or doc.get("emerging_score"))
+        top_score = max(top_score, emerging_score, impact_score)
+        signals.append(
+            {
+                "signal_id": str(doc.get("signal_id") or doc.get("_id") or ""),
+                "source_type": doc.get("source_type"),
+                "risk_type": doc.get("risk_type"),
+                "severity": doc.get("severity"),
+                "port_name": doc.get("port_name") or port_name,
+                "emerging_score": emerging_score,
+                "impact_score": impact_score,
+                "title": doc.get("title"),
+            }
+        )
+
+    return {
+        "score": top_score,
+        "top_ports": [port_name],
+        "signals": signals,
+    }
+
+
 async def _enrich_port_alert_doc(
     alert_doc: Dict[str, Any], thresholds: Dict[str, int]
 ) -> Dict[str, Any]:
@@ -557,13 +749,33 @@ async def _enrich_port_alert_doc(
 
     db = get_database()
     latest_scores = await _latest_port_signal_scores(port_name)
+    emerging_impact = await _latest_port_emerging_impact(port_name)
     scores = dict(alert_doc.get("scores") or {})
     scores["weather"] = max(_safe_int(scores.get("weather")), latest_scores["weather"])
     scores["news"] = max(_safe_int(scores.get("news")), latest_scores["news"])
     scores["congestion"] = max(_safe_int(scores.get("congestion")), latest_scores["congestion"])
+    scores["emerging"] = max(
+        _safe_int(scores.get("emerging")),
+        _safe_int(emerging_impact.get("score")),
+    )
     scores["final_risk"] = _calculate_port_combined_risk(scores)
     alert_doc["scores"] = scores
+    alert_doc["weather_score"] = scores["weather"]
+    alert_doc["news_score"] = scores["news"]
+    alert_doc["congestion_score"] = scores["congestion"]
+    alert_doc["emerging_score"] = scores["emerging"]
+    alert_doc["final_risk"] = scores["final_risk"]
     alert_doc["level"] = _get_alert_level_from_score(scores["final_risk"], thresholds)
+    alert_doc["emerging_impact"] = emerging_impact
+
+    category = _classify_port_alert_category_from_scores(scores)
+    alert_doc["category"] = category
+    alert_doc["title"] = _build_port_alert_title_from_scores(str(port_name), category)
+    alert_doc["summary"] = _build_port_alert_summary_from_scores(
+        str(port_name),
+        scores,
+        category,
+    )
 
     top_drivers = list(alert_doc.get("top_drivers") or [])
     if scores["weather"] > 0 and "weather" not in top_drivers:
@@ -642,6 +854,8 @@ async def update_alert_threshold_settings(
     generation_result = None
     if regenerate_alerts:
         generation_result = await generate_alerts_from_snapshots(thresholds=normalized)
+    else:
+        _clear_alert_cache()
 
     return {
         **normalized,
@@ -757,6 +971,8 @@ async def generate_alerts_from_snapshots(
             await db.alerts.insert_one(alert_doc)
             inserted += 1
 
+    _clear_alert_cache()
+
     return {
         "success": True,
         "routes_evaluated": len(processed_route_keys),
@@ -768,6 +984,11 @@ async def generate_alerts_from_snapshots(
 
 
 async def list_alerts(limit: int = 50) -> List[Dict[str, Any]]:
+    cache_key = f"list:{limit}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     db = get_database()
     docs = (
         await db.alerts.find({})
@@ -775,20 +996,26 @@ async def list_alerts(limit: int = 50) -> List[Dict[str, Any]]:
         .limit(limit)
         .to_list(length=limit)
     )
-    return [_serialize_doc(doc) for doc in docs]
+    return _set_cached(cache_key, [_serialize_doc(doc) for doc in docs])
 
 
 async def get_alert_summary() -> Dict[str, Any]:
+    cache_key = "summary"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     db = get_database()
     alerts = await db.alerts.find({}).to_list(length=5000)
+    active_alerts_only = [alert for alert in alerts if alert.get("status") == "active"]
 
     total_alerts = len(alerts)
-    active_alerts = sum(1 for a in alerts if a.get("status") == "active")
-    critical_alerts = sum(1 for a in alerts if a.get("level") == "critical")
-    warning_alerts = sum(1 for a in alerts if a.get("level") == "warning")
+    active_alerts = len(active_alerts_only)
+    critical_alerts = sum(1 for a in active_alerts_only if a.get("level") == "critical")
+    warning_alerts = sum(1 for a in active_alerts_only if a.get("level") == "warning")
 
     category_counts: Dict[str, int] = {}
-    for alert in alerts:
+    for alert in active_alerts_only:
         category = alert.get("category", "unknown")
         category_counts[category] = category_counts.get(category, 0) + 1
 
@@ -798,19 +1025,19 @@ async def get_alert_summary() -> Dict[str, Any]:
         else "none"
     )
 
-    return {
+    return _set_cached(cache_key, {
         "total_alerts": total_alerts,
         "active_alerts": active_alerts,
         "critical_alerts": critical_alerts,
         "warning_alerts": warning_alerts,
         "top_category": top_category,
-    }
+    })
 
 
 async def update_alert_status(alert_id: str, status: str) -> Dict[str, Any]:
     db = get_database()
 
-    await db.alerts.update_one(
+    result = await db.alerts.update_one(
         {"alert_id": alert_id},
         {
             "$set": {
@@ -819,6 +1046,11 @@ async def update_alert_status(alert_id: str, status: str) -> Dict[str, Any]:
             }
         },
     )
+    if result.matched_count == 0:
+        raise LookupError(f"Alert not found: {alert_id}")
+
+    _clear_alert_cache()
+    clear_dashboard_overview_cache()
 
     return {
         "message": "Alert status updated successfully",

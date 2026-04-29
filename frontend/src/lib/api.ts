@@ -2,28 +2,96 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
   "http://127.0.0.1:8000/api/v1";
 
+const API_CACHE_TTL_MS =
+  Number(
+    process.env.NEXT_PUBLIC_API_CACHE_TTL_MS ??
+      process.env.NEXT_PUBLIC_DASHBOARD_REFRESH_MS ??
+      "60000"
+  ) || 60000;
+
+type CacheEntry = {
+  data?: unknown;
+  fetchedAt: number;
+  promise?: Promise<unknown>;
+};
+
+const responseCache = new Map<string, CacheEntry>();
+
+function buildCacheKey(path: string, method = "GET") {
+  return `${method.toUpperCase()}:${path}`;
+}
+
+export function getCachedApiData<T>(path: string): T | undefined {
+  const cached = responseCache.get(buildCacheKey(path));
+  if (cached?.data === undefined) {
+    return undefined;
+  }
+  return cached.data as T;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const cacheKey = buildCacheKey(path, method);
+  const now = Date.now();
+
+  if (method === "GET") {
+    const cached = responseCache.get(cacheKey);
+    if (cached?.data !== undefined && now - cached.fetchedAt < API_CACHE_TTL_MS) {
+      return cached.data as T;
+    }
+    if (cached?.promise) {
+      return cached.promise as Promise<T>;
+    }
+  }
+
+  const request = fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
     cache: "no-store",
-  });
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        let message = `Request failed: ${response.status}`;
+        try {
+          const data = (await response.json()) as { detail?: string };
+          if (data?.detail) message = data.detail;
+        } catch {
+          //
+        }
+        throw new Error(message);
+      }
 
-  if (!response.ok) {
-    let message = `Request failed: ${response.status}`;
-    try {
-      const data = (await response.json()) as { detail?: string };
-      if (data?.detail) message = data.detail;
-    } catch {
-      //
-    }
-    throw new Error(message);
+      return response.json() as Promise<T>;
+    })
+    .then((data) => {
+      if (method === "GET") {
+        responseCache.set(cacheKey, {
+          data,
+          fetchedAt: Date.now(),
+        });
+      } else {
+        responseCache.clear();
+      }
+      return data;
+    })
+    .catch((error) => {
+      if (method === "GET") {
+        responseCache.delete(cacheKey);
+      }
+      throw error;
+    });
+
+  if (method === "GET") {
+    responseCache.set(cacheKey, {
+      fetchedAt: now,
+      promise: request,
+    });
   }
 
-  return response.json() as Promise<T>;
+  return request;
 }
 
 export type ApiDashboardOverview = {
@@ -40,6 +108,10 @@ export type ApiAlertSummary = {
   critical_alerts: number;
   warning_alerts: number;
   top_category: string;
+};
+
+export type ApiDashboardFilterOptions = {
+  business_units: string[];
 };
 
 export type ApiAlertThresholdSettings = {
@@ -100,8 +172,10 @@ export type ApiAnalyticsOverview = {
 
 export type ApiForecastPoint = {
   day: string;
+  date?: string;
   today_baseline: number;
   forecast_risk: number;
+  forecast_weather_score?: number;
   drift: number;
 };
 
@@ -112,6 +186,7 @@ export type ApiAnalyticsTimeSeriesPoint = {
   forecast_risk: number;
   drift: number;
   weather_score: number;
+  forecast_weather_score: number;
   news_score: number;
   congestion_score: number;
   logistics_score: number;
@@ -157,6 +232,7 @@ export type ApiLogisticsOverview = {
 
 export type ApiLogisticsTimeSeriesPoint = {
   day: string;
+  date?: string;
   avg_delay_hours: number;
   throughput_pct: number;
 };
@@ -219,6 +295,7 @@ export type ApiAlert = {
   lat?: number;
   lng?: number;
   country?: string;
+  business_unit?: string;
   weather_score?: number;
   news_score?: number;
   logistics_score?: number;
@@ -269,6 +346,10 @@ export type ApiRoutePrediction = {
 
 export async function getDashboardOverview() {
   return apiFetch<ApiDashboardOverview>("/dashboard/overview");
+}
+
+export async function getDashboardFilterOptions() {
+  return apiFetch<ApiDashboardFilterOptions>("/dashboard/filter-options");
 }
 
 export async function getAlertSummary() {

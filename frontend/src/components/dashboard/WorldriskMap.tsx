@@ -4,6 +4,10 @@ import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import maplibregl, { type MapGeoJSONFeature } from "maplibre-gl";
 import type { AlertItem } from "@/lib/mappers";
 
+type IdleInitHandle =
+  | { kind: "idle"; id: number }
+  | { kind: "timeout"; id: ReturnType<typeof setTimeout> };
+
 type Props = {
   alerts: AlertItem[];
   selectedAlertId: string | null;
@@ -154,7 +158,7 @@ function WorldRiskMap({
   const pulseFrameRef = useRef<number | null>(null);
   const resizeLoopFrameRef = useRef<number | null>(null);
   const cameraTimerRef = useRef<number | null>(null);
-  const idleInitRef = useRef<number | null>(null);
+  const idleInitRef = useRef<IdleInitHandle | null>(null);
 
   const alertsRef = useRef<AlertItem[]>(alerts);
   const selectedAlertIdRef = useRef<string | null>(selectedAlertId);
@@ -502,24 +506,27 @@ function WorldRiskMap({
     };
 
     if ("requestIdleCallback" in window) {
-      idleInitRef.current = window.requestIdleCallback(initializeMap, {
-        timeout: MAP_INIT_IDLE_TIMEOUT_MS,
-      });
+      idleInitRef.current = {
+        kind: "idle",
+        id: window.requestIdleCallback(initializeMap, {
+          timeout: MAP_INIT_IDLE_TIMEOUT_MS,
+        }),
+      };
     } else {
-      idleInitRef.current = window.setTimeout(
-        initializeMap,
-        MAP_INIT_IDLE_TIMEOUT_MS
-      );
+      idleInitRef.current = {
+        kind: "timeout",
+        id: globalThis.setTimeout(initializeMap, MAP_INIT_IDLE_TIMEOUT_MS),
+      };
     }
 
     return () => {
       hasLoadedRef.current = false;
 
       if (idleInitRef.current !== null) {
-        if ("cancelIdleCallback" in window) {
-          window.cancelIdleCallback(idleInitRef.current);
+        if (idleInitRef.current.kind === "idle" && "cancelIdleCallback" in window) {
+          window.cancelIdleCallback(idleInitRef.current.id);
         } else {
-          window.clearTimeout(idleInitRef.current);
+          globalThis.clearTimeout(idleInitRef.current.id);
         }
         idleInitRef.current = null;
       }

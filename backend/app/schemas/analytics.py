@@ -11,8 +11,10 @@ class AnalyticsOverviewResponse(BaseModel):
 
 class ForecastPointResponse(BaseModel):
     day: str
+    date: str | None = None
     today_baseline: float
     forecast_risk: float
+    forecast_weather_score: float | None = None
     drift: float
 
 
@@ -23,6 +25,7 @@ class AnalyticsTimeSeriesPointResponse(BaseModel):
     forecast_risk: float
     drift: float
     weather_score: float
+    forecast_weather_score: float | None = None
     news_score: float
     congestion_score: float
     logistics_score: float

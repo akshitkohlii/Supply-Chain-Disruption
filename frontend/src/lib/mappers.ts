@@ -6,6 +6,55 @@ import type {
 } from "./api";
 import type { AppSettings } from "./settings";
 
+const COUNTRY_TO_REGION: Record<string, string> = {
+  china: "Asia",
+  india: "Asia",
+  japan: "Asia",
+  "south korea": "Asia",
+  singapore: "Asia",
+  indonesia: "Asia",
+  vietnam: "Asia",
+  thailand: "Asia",
+  malaysia: "Asia",
+  philippines: "Asia",
+  germany: "Europe",
+  netherlands: "Europe",
+  belgium: "Europe",
+  france: "Europe",
+  spain: "Europe",
+  italy: "Europe",
+  "united kingdom": "Europe",
+  uk: "Europe",
+  poland: "Europe",
+  sweden: "Europe",
+  norway: "Europe",
+  denmark: "Europe",
+  "united states": "North America",
+  usa: "North America",
+  canada: "North America",
+  mexico: "North America",
+  brazil: "South America",
+  argentina: "South America",
+  chile: "South America",
+  colombia: "South America",
+  peru: "South America",
+  "united arab emirates": "Middle East",
+  uae: "Middle East",
+  saudi: "Middle East",
+  "saudi arabia": "Middle East",
+  qatar: "Middle East",
+  bahrain: "Middle East",
+  kuwait: "Middle East",
+  oman: "Middle East",
+  iran: "Middle East",
+  iraq: "Middle East",
+  egypt: "Africa",
+  morocco: "Africa",
+  kenya: "Africa",
+  nigeria: "Africa",
+  "south africa": "Africa",
+};
+
 export type AlertItem = {
   id: string;
   entityType?: "route" | "port";
@@ -65,6 +114,12 @@ function normalizeTimestamp(value?: string | null) {
   return value;
 }
 
+function inferRegionFromCountry(country?: string | null) {
+  if (!country) return "Global";
+  const normalized = country.trim().toLowerCase();
+  return COUNTRY_TO_REGION[normalized] ?? "Global";
+}
+
 function hasValidCoordinates(
   point: ApiMapPoint
 ): point is ApiMapPoint & { lng: number; lat: number } {
@@ -94,8 +149,8 @@ export function mapApiAlertToUiAlert(alert: ApiAlert): AlertItem {
       [alert.origin_port, alert.destination_port].filter(Boolean).join(" → ") ||
       "Unknown route",
     country: alert.country ?? "Unknown",
-    region: "Global",
-    businessUnit: undefined,
+    region: inferRegionFromCountry(alert.country),
+    businessUnit: alert.business_unit ?? undefined,
     category: alert.category,
     level: alert.level,
     status: alert.status,
@@ -187,7 +242,7 @@ export function mapApiMapPointToUiAlert(point: ApiMapPoint): AlertItem | null {
     title: point.name,
     location: point.name,
     country: point.country ?? "Unknown",
-    region: "Global",
+    region: inferRegionFromCountry(point.country),
     businessUnit: undefined,
     category: mappedCategory,
     level: mappedLevel,
@@ -237,30 +292,30 @@ export function buildDashboardKpisFromApi(params: {
 
   return [
     {
-      title: "Network Risk Index",
+      title: "Overall Network Risk",
       value: formatInt(Math.round(globalRiskScore)),
       change: `${alertSummary?.top_category ?? "stable"} focus`,
       trend: globalRiskScore >= 70 ? "up" : globalRiskScore >= 40 ? "neutral" : "down",
       risk: globalRiskScore >= 70 ? "high" : globalRiskScore >= 40 ? "medium" : "low",
     },
     {
-      title: "Active Critical Alerts",
+      title: "Critical Alerts Open",
       value: formatInt(criticalAlerts),
       change: `${formatInt(alertSummary?.active_alerts ?? 0)} active`,
       trend: criticalAlerts > 0 ? "up" : "neutral",
       risk: criticalAlerts >= 10 ? "high" : criticalAlerts >= 4 ? "medium" : "low",
     },
     {
-      title: "Routes In Warning/Critical State",
+      title: "Routes Requiring Action",
       value: formatInt(highRiskRoutes),
       change: "latest route snapshots",
       trend: highRiskRoutes > 0 ? "up" : "neutral",
       risk: highRiskRoutes >= 20 ? "high" : highRiskRoutes >= 8 ? "medium" : "low",
     },
     {
-      title: "Shipment Delay Exposure",
+      title: "Shipments Delayed > 12h",
       value: formatPercent(delayedShipmentsPercent),
-      change: "from shipment baseline",
+      change: "delay threshold > 12h",
       trend:
         delayedShipmentsPercent >= 20
           ? "up"
@@ -275,7 +330,7 @@ export function buildDashboardKpisFromApi(params: {
             : "low",
     },
     {
-      title: "Average Route Delay",
+      title: "Average Delay Per Route",
       value: `${avgRouteDelayHours.toFixed(1)}h`,
       change: `${avgRouteDelayHours.toFixed(1)}h avg delay`,
       trend: "neutral",

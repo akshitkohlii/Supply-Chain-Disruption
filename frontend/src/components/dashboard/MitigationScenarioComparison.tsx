@@ -74,9 +74,12 @@ export default function MitigationScenarioComparison({
     return <EmptyState message="No simulation scenarios available for this alert." />;
   }
 
-  const baseline = scenarios[0];
+  const baseline = scenarios.find((scenario) => scenario.id === "baseline") ?? null;
 
-  const bestScenario = scenarios.reduce((best, current) => {
+  const bestCandidates = scenarios.filter((scenario) => scenario.id !== "baseline");
+  const scoredScenarios = bestCandidates.length ? bestCandidates : scenarios;
+
+  const bestScenario = scoredScenarios.reduce((best, current) => {
     return rankScenario(current) < rankScenario(best) ? current : best;
   });
 
@@ -98,7 +101,7 @@ export default function MitigationScenarioComparison({
       <div className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4">
         <MetricCard label="Confidence" value={`${recommendation.confidence}%`} />
         <MetricCard label="Risk Reduction" value={`-${recommendation.impactReduction}%`} />
-        <MetricCard label="Baseline Risk" value={`${baseline.riskScore}`} />
+        <MetricCard label="Baseline Risk" value={baseline ? `${baseline.riskScore}` : "N/A"} />
         <MetricCard label="Best Option" value={bestScenario.label} compact />
       </div>
 
@@ -122,7 +125,7 @@ export default function MitigationScenarioComparison({
 
             <div className="min-h-0 flex-1 divide-y divide-slate-800/70 overflow-y-auto">
               {scenarios.map((scenario) => {
-                const isBaseline = scenario.id === baseline.id;
+                const isBaseline = scenario.id === baseline?.id;
                 const isBest = scenario.id === bestScenario.id;
 
                 return (

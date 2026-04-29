@@ -12,6 +12,7 @@ import RightRail from "@/components/dashboard/RightRail";
 
 import { buildDashboardKpisFromApi } from "@/lib/mappers";
 import { applyAlertThresholds } from "@/lib/mappers";
+import { REGION_OPTIONS } from "@/lib/settings";
 import { useAppSettings } from "@/features/dashboard/hooks/useAppSettings";
 import { useDashboardData } from "@/features/dashboard/hooks/useDashboardData";
 import { useDashboardFilters } from "@/features/dashboard/hooks/useDashboardFilters";
@@ -44,6 +45,40 @@ const BottomSection = dynamic(
     ),
   }
 );
+
+function DashboardLoadingState() {
+  return (
+    <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center">
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        className="relative overflow-hidden rounded-[28px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.14),transparent_38%),linear-gradient(180deg,rgba(2,6,23,0.96),rgba(15,23,42,0.84))] px-10 py-12 text-center shadow-[0_24px_80px_rgba(2,132,199,0.14)]"
+      >
+        <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-transparent" />
+        <div className="flex flex-col items-center gap-5">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1.1, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
+            className="relative h-14 w-14"
+          >
+            <div className="absolute inset-0 rounded-full border-2 border-slate-700/80" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-cyan-300 border-r-cyan-400/70 shadow-[0_0_22px_rgba(34,211,238,0.35)]" />
+          </motion.div>
+
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold tracking-[0.02em] text-white md:text-xl">
+              Loading dashboard
+            </h2>
+            <p className="max-w-sm text-sm leading-6 text-slate-300">
+              Pulling alerts, analytics, and logistics signals into view.
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const data = useDashboardData();
@@ -88,6 +123,30 @@ export default function DashboardPage() {
 
   const filteredAlerts = useMemo(() => filterAlerts(alerts, filters), [alerts, filters]);
 
+  const regionOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const alert of alerts) {
+      if (alert.region && alert.region !== "Global") {
+        values.add(alert.region);
+      }
+    }
+    for (const regionOption of REGION_OPTIONS) {
+      if (regionOption !== "All Regions") {
+        values.add(regionOption);
+      }
+    }
+    return ["All Regions", ...Array.from(values).sort((a, b) => a.localeCompare(b))];
+  }, [alerts]);
+
+  const businessUnitOptions = useMemo(() => {
+    return [
+      "All Units",
+      ...((data.dashboardFilterOptions?.business_units ?? []).slice().sort((a, b) =>
+        a.localeCompare(b)
+      )),
+    ];
+  }, [data.dashboardFilterOptions]);
+
   const visibleAlerts = useMemo(
     () => buildVisibleAlerts(filteredAlerts, settings),
     [filteredAlerts, settings]
@@ -131,7 +190,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="relative z-0 min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
-          <div className="text-slate-400">Loading dashboard...</div>
+          <DashboardLoadingState />
         </div>
       </div>
     );
@@ -184,6 +243,8 @@ export default function DashboardPage() {
             onRegionChange={setRegion}
             businessUnit={businessUnit}
             onBusinessUnitChange={setBusinessUnit}
+            regionOptions={regionOptions}
+            businessUnitOptions={businessUnitOptions}
             riskLevel={riskLevel}
             onRiskLevelChange={handleRiskLevelChange}
           />

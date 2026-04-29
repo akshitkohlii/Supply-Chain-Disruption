@@ -1,6 +1,8 @@
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from app.core.database import get_database
+from app.core.config import settings
 from app.services.port_service import get_active_ports
 from app.services.news_service import fetch_news_for_supplier, normalize_news_signal
 from app.services.weather_service import extract_weather_metrics, fetch_weather_for_location
@@ -28,8 +30,6 @@ def _normalize_weather_signal_for_port(
     metrics = extract_weather_metrics(api_payload)
     if not metrics:
         return None
-
-    from datetime import datetime, timezone
 
     return {
         "source": "openweather",
@@ -63,22 +63,57 @@ async def _get_active_ports() -> List[Dict[str, Any]]:
     return await get_active_ports()
 
 
+def _coerce_utc_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    return None
+
+
+def _signal_is_fresh(doc: Dict[str, Any] | None, max_age_seconds: int) -> bool:
+    if not doc:
+        return False
+    fetched_at = _coerce_utc_datetime(doc.get("fetched_at"))
+    if fetched_at is None:
+        return False
+    age_seconds = (datetime.now(timezone.utc) - fetched_at).total_seconds()
+    return age_seconds < max(60, max_age_seconds)
+
+
+async def _existing_port_signal(
+    collection_name: str,
+    entity_id: str,
+) -> Dict[str, Any] | None:
+    db = get_database()
+    return await db[collection_name].find_one(
+        {"entity_type": "port", "entity_id": entity_id},
+        sort=[("fetched_at", -1)],
+    )
+
+
 async def ingest_weather_signals_for_all_ports() -> Dict[str, Any]:
     db = get_database()
     ports = await _get_active_ports()
 
     inserted = 0
     skipped = 0
+    reused = 0
+    preserved = 0
     errors: List[Dict[str, Any]] = []
-
-    await db.weather_signals.delete_many({})
 
     for port in ports:
         lat = port.get("lat")
         lng = port.get("lng")
+        entity_id = str(port.get("_id"))
+        existing_doc = await _existing_port_signal("weather_signals", entity_id)
 
         if lat is None or lng is None:
             skipped += 1
+            continue
+
+        if _signal_is_fresh(existing_doc, settings.WEATHER_REFRESH_INTERVAL_SECONDS):
+            reused += 1
             continue
 
         try:
@@ -86,12 +121,23 @@ async def ingest_weather_signals_for_all_ports() -> Dict[str, Any]:
             signal_doc = _normalize_weather_signal_for_port(port, payload)
 
             if not signal_doc:
-                skipped += 1
+                if existing_doc:
+                    preserved += 1
+                else:
+                    skipped += 1
                 continue
 
-            await db.weather_signals.insert_one(signal_doc)
+            await db.weather_signals.update_one(
+                {"entity_id": signal_doc["entity_id"], "entity_type": signal_doc["entity_type"]},
+                {"$set": signal_doc},
+                upsert=True,
+            )
             inserted += 1
         except Exception as exc:
+            if existing_doc:
+                preserved += 1
+            else:
+                skipped += 1
             errors.append(
                 {
                     "port_name": port.get("port_name"),
@@ -102,6 +148,8 @@ async def ingest_weather_signals_for_all_ports() -> Dict[str, Any]:
     return {
         "total_ports": len(ports),
         "inserted": inserted,
+        "reused": reused,
+        "preserved": preserved,
         "skipped": skipped,
         "errors": errors[:20],
     }
@@ -111,25 +159,47 @@ async def ingest_news_signals_for_all_ports() -> Dict[str, Any]:
     db = get_database()
     ports = await _get_active_ports()
 
-    inserted = 0
+    upserted = 0
     skipped = 0
+    reused = 0
+    preserved = 0
     errors: List[Dict[str, Any]] = []
 
-    await db.news_signals.delete_many({})
-
     for port in ports:
+        entity_id = str(port.get("_id"))
+        existing_doc = await _existing_port_signal("news_signals", entity_id)
+
+        if _signal_is_fresh(existing_doc, settings.NEWS_REFRESH_INTERVAL_SECONDS):
+            reused += 1
+            continue
+
         try:
             news_entity = _port_to_news_entity(port)
             payload = await fetch_news_for_supplier(news_entity)
             signal_doc = normalize_news_signal(news_entity, payload)
 
             if not signal_doc:
-                skipped += 1
+                if existing_doc:
+                    preserved += 1
+                else:
+                    skipped += 1
                 continue
 
-            await db.news_signals.insert_one(signal_doc)
-            inserted += 1
+            if existing_doc and signal_doc.get("article_count", 0) == 0:
+                preserved += 1
+                continue
+
+            await db.news_signals.update_one(
+                {"entity_id": signal_doc["entity_id"], "entity_type": signal_doc["entity_type"]},
+                {"$set": signal_doc},
+                upsert=True,
+            )
+            upserted += 1
         except Exception as exc:
+            if existing_doc:
+                preserved += 1
+            else:
+                skipped += 1
             errors.append(
                 {
                     "port_name": port.get("port_name"),
@@ -139,7 +209,9 @@ async def ingest_news_signals_for_all_ports() -> Dict[str, Any]:
 
     return {
         "total_ports": len(ports),
-        "inserted": inserted,
+        "upserted": upserted,
+        "reused": reused,
+        "preserved": preserved,
         "skipped": skipped,
         "errors": errors[:20],
     }

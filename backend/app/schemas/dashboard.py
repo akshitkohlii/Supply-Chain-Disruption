@@ -7,3 +7,7 @@ class DashboardOverviewResponse(BaseModel):
     highRiskRoutes: int
     delayedShipmentsPercent: float
     avgRouteDelayHours: float
+
+
+class DashboardFilterOptionsResponse(BaseModel):
+    business_units: list[str]

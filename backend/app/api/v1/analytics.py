@@ -7,7 +7,10 @@ from app.schemas.analytics import (
     LanePressureItemResponse,
     SupplierExposureItemResponse,
 )
-from app.schemas.dashboard import DashboardOverviewResponse
+from app.schemas.dashboard import (
+    DashboardFilterOptionsResponse,
+    DashboardOverviewResponse,
+)
 from app.services.analytics_service import (
     get_analytics_forecast,
     get_analytics_overview,
@@ -16,6 +19,7 @@ from app.services.analytics_service import (
     get_supplier_exposure,
 )
 from app.services.dashboard_service import get_dashboard_overview
+from app.services.dashboard_service import get_dashboard_filter_options
 from app.services.logistics_service import (
     get_logistics_overview,
     get_logistics_timeseries,
@@ -31,6 +35,11 @@ logistics_router = APIRouter()
 @dashboard_router.get("/overview", response_model=DashboardOverviewResponse)
 async def dashboard_overview():
     return await get_dashboard_overview()
+
+
+@dashboard_router.get("/filter-options", response_model=DashboardFilterOptionsResponse)
+async def dashboard_filter_options():
+    return await get_dashboard_filter_options()
 
 
 @map_router.get("/points")

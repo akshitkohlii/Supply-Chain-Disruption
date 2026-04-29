@@ -1,7 +1,34 @@
+from datetime import datetime, timedelta, timezone
+
 from app.core.database import get_database
+
+_CACHE_TTL_SECONDS = 20
+_dashboard_overview_cache: dict | None = None
+_dashboard_overview_cache_at: datetime | None = None
+_dashboard_filter_options_cache: dict | None = None
+_dashboard_filter_options_cache_at: datetime | None = None
+SHIPMENT_DELAY_KPI_THRESHOLD_HOURS = 12
+
+
+def _cache_valid(cached_at: datetime | None) -> bool:
+    return bool(
+        cached_at
+        and datetime.now(timezone.utc) - cached_at < timedelta(seconds=_CACHE_TTL_SECONDS)
+    )
+
+
+def clear_dashboard_overview_cache() -> None:
+    global _dashboard_overview_cache, _dashboard_overview_cache_at
+    _dashboard_overview_cache = None
+    _dashboard_overview_cache_at = None
 
 
 async def get_dashboard_overview():
+    global _dashboard_overview_cache, _dashboard_overview_cache_at
+
+    if _dashboard_overview_cache is not None and _cache_valid(_dashboard_overview_cache_at):
+        return _dashboard_overview_cache
+
     db = get_database()
 
     latest_snapshots = await db.risk_snapshots.find(
@@ -37,22 +64,27 @@ async def get_dashboard_overview():
 
     combined_risk_values = route_risk_values + non_route_alert_risk_values
 
-    if latest_route_snapshots:
+    if combined_risk_values:
         global_risk_score = round(
             sum(combined_risk_values) / len(combined_risk_values),
             2,
-        ) if combined_risk_values else 0
+        )
+    else:
+        global_risk_score = 0
+
+    if latest_route_snapshots:
         high_risk_routes = sum(
             1
             for snap in latest_route_snapshots
             if int((snap.get("scores", {}) or {}).get("final_risk", 0)) >= 65
         )
     else:
-        global_risk_score = 0
         high_risk_routes = 0
 
     total_shipments = await db.shipments_raw.count_documents({})
-    delayed_shipments = await db.shipments_raw.count_documents({"delay_hours": {"$gt": 0}})
+    delayed_shipments = await db.shipments_raw.count_documents(
+        {"delay_hours": {"$gt": SHIPMENT_DELAY_KPI_THRESHOLD_HOURS}}
+    )
     delayed_shipments_percent = round(
         (delayed_shipments / total_shipments) * 100, 2
     ) if total_shipments else 0
@@ -75,10 +107,41 @@ async def get_dashboard_overview():
         {"level": "critical", "status": "active"}
     )
 
-    return {
+    result = {
         "globalRiskScore": global_risk_score,
         "criticalAlerts": critical_alerts,
         "highRiskRoutes": high_risk_routes,
         "delayedShipmentsPercent": delayed_shipments_percent,
         "avgRouteDelayHours": avg_route_delay_hours,
     }
+
+    _dashboard_overview_cache = result
+    _dashboard_overview_cache_at = datetime.now(timezone.utc)
+    return result
+
+
+async def get_dashboard_filter_options():
+    global _dashboard_filter_options_cache, _dashboard_filter_options_cache_at
+
+    if _dashboard_filter_options_cache is not None and _cache_valid(
+        _dashboard_filter_options_cache_at
+    ):
+        return _dashboard_filter_options_cache
+
+    db = get_database()
+    business_units = await db.shipments_raw.distinct("business_unit")
+    normalized_business_units = sorted(
+        {
+            str(unit).strip()
+            for unit in business_units
+            if isinstance(unit, str) and unit.strip()
+        }
+    )
+
+    result = {
+        "business_units": normalized_business_units,
+    }
+
+    _dashboard_filter_options_cache = result
+    _dashboard_filter_options_cache_at = datetime.now(timezone.utc)
+    return result

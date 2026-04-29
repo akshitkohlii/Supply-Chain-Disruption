@@ -71,6 +71,8 @@ def build_inference_features(
 ) -> pd.DataFrame:
     origin = route_doc.get("origin_port") or "Unknown"
     destination = route_doc.get("destination_port") or "Unknown"
+    origin_congestion = max(0.0, float(congestion_score) * 0.45)
+    destination_congestion = max(0.0, float(congestion_score) * 0.55)
 
     row = {
         "route_key": route_doc.get("route_key") or f"{origin}|{destination}",
@@ -96,13 +98,23 @@ def build_inference_features(
             if route_doc.get("transport_modes")
             else "Sea"
         ),
+        "carrier_name": "Unknown",
+        "origin_country": "Unknown",
+        "destination_country": "Unknown",
+        "sku_group": "General",
+        "temperature_control_required": False,
         "expected_time_hours": float(route_doc.get("avg_expected_time_hours") or 0),
+        "route_distance_km": float(route_doc.get("route_distance_km") or 0),
         "inventory_level": float(route_doc.get("avg_inventory_level") or 0),
         "safety_stock_level": float(route_doc.get("avg_safety_stock_level") or 1),
         "units_sold_7d": float(route_doc.get("avg_units_sold_7d") or 0),
         "demand_volatility": float(route_doc.get("avg_demand_volatility") or 0),
         "order_value": float(route_doc.get("avg_order_value") or 0),
         "customs_clearance_hours": float(route_doc.get("avg_customs_clearance_hours") or 0),
+        "port_congestion_origin": origin_congestion,
+        "port_congestion_destination": destination_congestion,
+        "fuel_price_index": 0.0,
+        "route_pressure": origin_congestion + destination_congestion,
         "inventory_gap": float(route_doc.get("avg_inventory_level") or 0)
         - float(route_doc.get("avg_safety_stock_level") or 0),
         "inventory_ratio": float(route_doc.get("avg_inventory_level") or 0)
@@ -119,13 +131,23 @@ def build_inference_features(
         "product_category",
         "priority_level",
         "transport_mode",
+        "carrier_name",
+        "origin_country",
+        "destination_country",
+        "sku_group",
+        "temperature_control_required",
         "expected_time_hours",
+        "route_distance_km",
         "inventory_level",
         "safety_stock_level",
         "units_sold_7d",
         "demand_volatility",
         "order_value",
         "customs_clearance_hours",
+        "port_congestion_origin",
+        "port_congestion_destination",
+        "fuel_price_index",
+        "route_pressure",
         "inventory_gap",
         "inventory_ratio",
         "month",

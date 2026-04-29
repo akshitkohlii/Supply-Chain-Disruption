@@ -40,7 +40,10 @@ function getDisplayData(
   const sorted = [...data].sort((a, b) => {
     if (sortMode === "risk") return b.risk_score - a.risk_score;
     if (sortMode === "dependency") return b.dependency_score - a.dependency_score;
-    return b.combined_score - a.combined_score;
+    return (
+      (b.risk_score + b.dependency_score) / 2 -
+      (a.risk_score + a.dependency_score) / 2
+    );
   });
 
   return showAll ? sorted : sorted.slice(0, VISIBLE_ROWS);

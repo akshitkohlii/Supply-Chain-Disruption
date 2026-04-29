@@ -1,7 +1,27 @@
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from app.core.database import get_database
 from app.services.port_service import get_active_ports
+
+_CACHE_TTL_SECONDS = 20
+_map_points_cache: dict[str, tuple[datetime, Any]] = {}
+
+
+def _get_cached(key: str):
+    cached = _map_points_cache.get(key)
+    if not cached:
+        return None
+    cached_at, value = cached
+    if datetime.now(timezone.utc) - cached_at >= timedelta(seconds=_CACHE_TTL_SECONDS):
+        _map_points_cache.pop(key, None)
+        return None
+    return value
+
+
+def _set_cached(key: str, value: Any):
+    _map_points_cache[key] = (datetime.now(timezone.utc), value)
+    return value
 
 
 def _signal_level(weather_score: int, news_score: int) -> str:
@@ -14,6 +34,11 @@ def _signal_level(weather_score: int, news_score: int) -> str:
 
 
 async def get_map_points(limit: int = 500) -> List[Dict[str, Any]]:
+    cache_key = f"points:{limit}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     db = get_database()
 
     ports = await get_active_ports()
@@ -66,4 +91,4 @@ async def get_map_points(limit: int = 500) -> List[Dict[str, Any]]:
             }
         )
 
-    return points
+    return _set_cached(cache_key, points)
