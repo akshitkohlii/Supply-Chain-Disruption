@@ -7,16 +7,16 @@ import {
   AreaChart,
   CartesianGrid,
   Line,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import PageShell from "@/components/dashboard/PageShell";
-import PageHeader from "@/components/dashboard/PageHeader";
-import PageSection from "@/components/dashboard/PageSection";
-import Panel from "@/components/dashboard/Panel";
+import PageHeader from "@/components/shell/PageHeader";
+import PageSection from "@/components/shell/PageSection";
+import PageShell from "@/components/shell/PageShell";
+import Panel from "@/components/shell/Panel";
 import {
+  getCachedApiData,
   getAnalyticsOverview,
   getAnalyticsTimeSeries,
   getLanePressure,
@@ -26,25 +26,91 @@ import {
   type ApiLanePressureItem,
   type ApiSupplierExposureItem,
 } from "@/lib/api";
+import {
+  glowResetButtonClass,
+  glowResetButtonCompactShadowClass,
+  glowResetButtonShadowClass,
+} from "@/lib/ui";
 
 type FocusMode = "all" | "forecast" | "suppliers" | "logistics";
+
+const ANALYTICS_OVERVIEW_PATH = "/analytics/overview";
+const SUPPLIER_EXPOSURE_PATH = "/analytics/supplier-exposure";
+const LANE_PRESSURE_PATH = "/analytics/lane-pressure";
+
+function buildAnalyticsTimeSeriesPath(params?: { port?: string; lane?: string }) {
+  const search = new URLSearchParams();
+  if (params?.port) search.set("port", params.port);
+  if (params?.lane) search.set("lane", params.lane);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return `/analytics/time-series${suffix}`;
+}
 
 export default function AnalyticsPage() {
   const [focusMode, setFocusMode] = useState<FocusMode>("all");
   const [selectedPort, setSelectedPort] = useState("");
   const [selectedLane, setSelectedLane] = useState("");
-  const [overview, setOverview] = useState<ApiAnalyticsOverview | null>(null);
-  const [timeSeries, setTimeSeries] = useState<ApiAnalyticsTimeSeriesPoint[]>([]);
-  const [supplierExposure, setSupplierExposure] = useState<ApiSupplierExposureItem[]>([]);
-  const [lanePressure, setLanePressure] = useState<ApiLanePressureItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [overview, setOverview] = useState<ApiAnalyticsOverview | null>(() =>
+    getCachedApiData<ApiAnalyticsOverview>(ANALYTICS_OVERVIEW_PATH) ?? null
+  );
+  const [timeSeries, setTimeSeries] = useState<ApiAnalyticsTimeSeriesPoint[]>(() => {
+    return (
+      getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(buildAnalyticsTimeSeriesPath()) ?? []
+    );
+  });
+  const [supplierExposure, setSupplierExposure] = useState<ApiSupplierExposureItem[]>(() =>
+    getCachedApiData<ApiSupplierExposureItem[]>(SUPPLIER_EXPOSURE_PATH) ?? []
+  );
+  const [lanePressure, setLanePressure] = useState<ApiLanePressureItem[]>(() =>
+    getCachedApiData<ApiLanePressureItem[]>(LANE_PRESSURE_PATH) ?? []
+  );
+  const [isLoading, setIsLoading] = useState(() => {
+    const hasCachedOverview = !!getCachedApiData<ApiAnalyticsOverview>(ANALYTICS_OVERVIEW_PATH);
+    const hasCachedTimeSeries =
+      !!getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(buildAnalyticsTimeSeriesPath())?.length;
+    const hasCachedSupplierExposure =
+      !!getCachedApiData<ApiSupplierExposureItem[]>(SUPPLIER_EXPOSURE_PATH)?.length;
+    const hasCachedLanePressure =
+      !!getCachedApiData<ApiLanePressureItem[]>(LANE_PRESSURE_PATH)?.length;
+
+    return !(
+      hasCachedOverview ||
+      hasCachedTimeSeries ||
+      hasCachedSupplierExposure ||
+      hasCachedLanePressure
+    );
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const cachedOverview = getCachedApiData<ApiAnalyticsOverview>(ANALYTICS_OVERVIEW_PATH);
+    const cachedTimeSeries =
+      getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(
+        buildAnalyticsTimeSeriesPath({
+          port: selectedPort || undefined,
+          lane: selectedLane || undefined,
+        })
+      ) ?? [];
+    const cachedSupplierExposure =
+      getCachedApiData<ApiSupplierExposureItem[]>(SUPPLIER_EXPOSURE_PATH) ?? [];
+    const cachedLanePressure =
+      getCachedApiData<ApiLanePressureItem[]>(LANE_PRESSURE_PATH) ?? [];
+    const hasCachedData =
+      !!cachedOverview ||
+      cachedTimeSeries.length > 0 ||
+      cachedSupplierExposure.length > 0 ||
+      cachedLanePressure.length > 0;
+
+    if (cachedOverview) {
+      setOverview(cachedOverview);
+    }
+    setTimeSeries(cachedTimeSeries);
+    setSupplierExposure(cachedSupplierExposure);
+    setLanePressure(cachedLanePressure);
 
     async function loadAnalytics() {
-      setIsLoading(true);
+      setIsLoading(!hasCachedData);
       setError(null);
 
       try {
@@ -161,6 +227,12 @@ export default function AnalyticsPage() {
     ];
   }, [timeSeriesRows]);
 
+  const hasAnalyticsData =
+    !!overview ||
+    timeSeriesRows.length > 0 ||
+    supplierExposureRows.length > 0 ||
+    logisticsRows.length > 0;
+
   return (
     <PageShell
       header={
@@ -246,7 +318,7 @@ export default function AnalyticsPage() {
                     setSelectedPort("");
                     setSelectedLane("");
                   }}
-                  className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-700 hover:text-white"
+                  className={`rounded-lg px-2.5 py-1 text-xs ${glowResetButtonClass} ${glowResetButtonCompactShadowClass}`}
                 >
                   Reset
                 </button>
@@ -261,7 +333,7 @@ export default function AnalyticsPage() {
             className="xl:col-span-8"
             bodyClassName="h-full"
           >
-            {isLoading ? (
+            {isLoading && !hasAnalyticsData ? (
               <AnalyticsEmptyState message="Loading time-series analysis..." isLoading />
             ) : error ? (
               <AnalyticsEmptyState message={error} isError />
@@ -318,7 +390,7 @@ export default function AnalyticsPage() {
                       setSelectedPort("");
                       setSelectedLane("");
                     }}
-                    className="rounded-2xl border border-slate-800/80 bg-slate-950/45 px-4 py-3 text-sm text-slate-300 transition hover:border-slate-700 hover:text-white"
+                    className={`rounded-2xl px-4 py-3 text-sm ${glowResetButtonClass} ${glowResetButtonShadowClass}`}
                   >
                     Reset Filters
                   </button>
@@ -339,8 +411,12 @@ export default function AnalyticsPage() {
                 </div>
 
                 <div className="h-[340px] rounded-2xl border border-slate-800/70 bg-slate-950/55 p-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={timeSeriesRows} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                  <AreaChart
+                    responsive
+                    data={timeSeriesRows}
+                    style={{ width: "100%", height: "100%" }}
+                    margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
+                  >
                       <defs>
                         <linearGradient id="riskSeriesFill" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.25} />
@@ -363,8 +439,7 @@ export default function AnalyticsPage() {
                       <Line type="monotone" dataKey="weatherScore" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
                       <Line type="monotone" dataKey="congestionScore" stroke="#22d3ee" strokeWidth={1.5} dot={false} />
                       <Line type="monotone" dataKey="logisticsScore" stroke="#34d399" strokeWidth={1.5} dot={false} />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                  </AreaChart>
                 </div>
               </div>
             )}

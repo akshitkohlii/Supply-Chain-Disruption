@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import Panel from "@/components/dashboard/Panel";
-import PageShell from "@/components/dashboard/PageShell";
-import PageHeader from "@/components/dashboard/PageHeader";
-import PageSection from "@/components/dashboard/PageSection";
 import SupplierMlRail from "@/components/dashboard/SupplierMlRail";
+import PageHeader from "@/components/shell/PageHeader";
+import PageSection from "@/components/shell/PageSection";
+import PageShell from "@/components/shell/PageShell";
+import Panel from "@/components/shell/Panel";
 import {
   getAllSuppliers,
   getSupplierMlPrediction,

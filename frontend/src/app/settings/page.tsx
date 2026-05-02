@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import PageShell from "@/components/dashboard/PageShell";
-import PageHeader from "@/components/dashboard/PageHeader";
-import PageSection from "@/components/dashboard/PageSection";
-import Panel from "@/components/dashboard/Panel";
+import PageHeader from "@/components/shell/PageHeader";
+import PageSection from "@/components/shell/PageSection";
+import PageShell from "@/components/shell/PageShell";
+import Panel from "@/components/shell/Panel";
 import { updateAlertThresholdSettings } from "@/lib/api";
 import {
   DEFAULT_APP_SETTINGS,
@@ -41,11 +41,11 @@ export default function SettingsPage() {
 
   const hasUnsavedChanges =
     JSON.stringify(draftSettings) !== JSON.stringify(savedSettings);
+  const thresholdOrderInvalid =
+    draftSettings.warningRiskThreshold >= draftSettings.criticalRiskThreshold;
 
   async function applyChanges() {
     setIsApplying(true);
-    saveAppSettings(draftSettings);
-    setSavedSettings(draftSettings);
 
     try {
       const result = await updateAlertThresholdSettings({
@@ -53,6 +53,9 @@ export default function SettingsPage() {
         warningRiskThreshold: draftSettings.warningRiskThreshold,
         regenerateAlerts: true,
       });
+
+      saveAppSettings(draftSettings);
+      setSavedSettings(draftSettings);
 
       const rebuiltAlerts = result.generation_result?.alerts_upserted;
       setSaveMessage(
@@ -63,8 +66,8 @@ export default function SettingsPage() {
     } catch (error) {
       setSaveMessage(
         error instanceof Error
-          ? `Changes saved locally, but backend sync failed: ${error.message}`
-          : "Changes saved locally, but backend sync failed."
+          ? `Changes not applied: ${error.message}`
+          : "Changes not applied."
       );
     } finally {
       setIsApplying(false);
@@ -112,7 +115,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={applyChanges}
-              disabled={!hasUnsavedChanges || isApplying}
+              disabled={!hasUnsavedChanges || isApplying || thresholdOrderInvalid}
               className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/15 hover:text-white disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/60 disabled:text-slate-500"
             >
               {isApplying ? "Applying..." : "Apply Changes"}
@@ -125,6 +128,8 @@ export default function SettingsPage() {
             <SettingRow label="Critical Risk Threshold">
               <input
                 type="number"
+                min={0}
+                max={100}
                 value={draftSettings.criticalRiskThreshold}
                 onChange={(event) =>
                   updateSettings((current) => ({
@@ -139,6 +144,8 @@ export default function SettingsPage() {
             <SettingRow label="Warning Risk Threshold">
               <input
                 type="number"
+                min={0}
+                max={100}
                 value={draftSettings.warningRiskThreshold}
                 onChange={(event) =>
                   updateSettings((current) => ({
@@ -149,6 +156,12 @@ export default function SettingsPage() {
                 className="input w-28"
               />
             </SettingRow>
+
+            {thresholdOrderInvalid ? (
+              <p className="text-xs text-rose-400">
+                Warning threshold must be lower than the critical threshold.
+              </p>
+            ) : null}
 
             <SettingRow label="Max Acceptable Delay (hrs)">
               <input
@@ -223,6 +236,10 @@ export default function SettingsPage() {
               }
             />
           </div>
+          <p className="mt-4 text-xs text-slate-500">
+            These toggles are saved as local app preferences only. They do not
+            start or stop backend ingestion jobs.
+          </p>
         </Panel>
 
         <Panel title="Display Defaults">

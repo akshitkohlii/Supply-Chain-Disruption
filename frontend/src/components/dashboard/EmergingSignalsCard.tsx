@@ -1,6 +1,6 @@
 "use client";
 
-import Panel from "./Panel";
+import Panel from "@/components/shell/Panel";
 import type { ApiEmergingSignal } from "@/lib/api";
 
 type EmergingSignalsCardProps = {

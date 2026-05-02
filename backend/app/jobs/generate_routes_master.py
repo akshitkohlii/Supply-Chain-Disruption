@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.refresh_service import refresh_routes_master
+from app.services.refresh.refresh_service import refresh_routes_master
 
 
 async def main():

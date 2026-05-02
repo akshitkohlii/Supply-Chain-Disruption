@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from pymongo import ReplaceOne
+
 from app.core.database import get_database
-from app.services.dashboard_service import clear_dashboard_overview_cache
-from app.services.port_service import get_port_by_name
+from app.services.dashboard.dashboard_service import clear_dashboard_overview_cache
+from app.services.ports.port_service import get_port_by_name
 
 ALERT_THRESHOLD_SETTINGS_ID = "alert-threshold-settings"
 DEFAULT_ALERT_THRESHOLDS = {
@@ -76,6 +78,12 @@ def _normalize_alert_thresholds(doc: Optional[Dict[str, Any]] = None) -> Dict[st
             DEFAULT_ALERT_THRESHOLDS["warning_risk_threshold"],
         ),
     }
+
+
+def _validate_threshold_order(thresholds: Dict[str, int]) -> Dict[str, int]:
+    if thresholds["warning_risk_threshold"] >= thresholds["critical_risk_threshold"]:
+        raise ValueError("warning_risk_threshold must be less than critical_risk_threshold")
+    return thresholds
 
 
 def _get_alert_level_from_score(score: int, thresholds: Dict[str, int]) -> str:
@@ -833,11 +841,13 @@ async def update_alert_threshold_settings(
     regenerate_alerts: bool = True,
 ) -> Dict[str, Any]:
     db = get_database()
-    normalized = _normalize_alert_thresholds(
-        {
-            "critical_risk_threshold": critical_risk_threshold,
-            "warning_risk_threshold": warning_risk_threshold,
-        }
+    normalized = _validate_threshold_order(
+        _normalize_alert_thresholds(
+            {
+                "critical_risk_threshold": critical_risk_threshold,
+                "warning_risk_threshold": warning_risk_threshold,
+            }
+        )
     )
 
     await db.app_settings.update_one(
@@ -868,7 +878,9 @@ async def generate_alerts_from_snapshots(
     thresholds: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     db = get_database()
-    thresholds = thresholds or await get_alert_threshold_settings()
+    thresholds = _validate_threshold_order(
+        thresholds or await get_alert_threshold_settings()
+    )
 
     routes = (
         await db.risk_snapshots.find({"entity_type": "route"})
@@ -884,10 +896,10 @@ async def generate_alerts_from_snapshots(
 
     processed_route_keys = list(latest_by_route.keys())
 
-    await db.alerts.delete_many({})
-
     inserted = 0
     skipped = 0
+    alert_docs: List[Dict[str, Any]] = []
+    alert_ids: List[str] = []
 
     for _, route in latest_by_route.items():
         if not _should_create_alert(route, thresholds):
@@ -906,7 +918,8 @@ async def generate_alerts_from_snapshots(
         if country:
             alert_doc["country"] = country
 
-        await db.alerts.insert_one(alert_doc)
+        alert_docs.append(alert_doc)
+        alert_ids.append(str(alert_doc["alert_id"]))
         inserted += 1
 
     emerging_signals = (
@@ -936,7 +949,8 @@ async def generate_alerts_from_snapshots(
         if alert_doc.get("level") == "stable":
             skipped += 1
             continue
-        await db.alerts.insert_one(alert_doc)
+        alert_docs.append(alert_doc)
+        alert_ids.append(str(alert_doc["alert_id"]))
         inserted += 1
 
     existing_port_source_keys = set(latest_by_port_source.keys())
@@ -968,10 +982,24 @@ async def generate_alerts_from_snapshots(
             if alert_doc.get("level") == "stable":
                 skipped += 1
                 continue
-            await db.alerts.insert_one(alert_doc)
+            alert_docs.append(alert_doc)
+            alert_ids.append(str(alert_doc["alert_id"]))
             inserted += 1
 
+    if alert_docs:
+        await db.alerts.bulk_write(
+            [
+                ReplaceOne({"alert_id": doc["alert_id"]}, doc, upsert=True)
+                for doc in alert_docs
+            ],
+            ordered=False,
+        )
+
+    stale_filter = {"alert_id": {"$nin": alert_ids}} if alert_ids else {}
+    await db.alerts.delete_many(stale_filter)
+
     _clear_alert_cache()
+    clear_dashboard_overview_cache()
 
     return {
         "success": True,

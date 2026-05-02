@@ -2,7 +2,7 @@ import { memo, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 
-import Panel from "./Panel";
+import Panel from "@/components/shell/Panel";
 import LayerChip from "./ui/LayerChip";
 import Legend from "./ui/Legend";
 import AlertRow from "./ui/AlertRow";

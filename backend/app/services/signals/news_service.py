@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 import httpx
 
 from app.core.config import settings
-from app.services.news_relevance_model_service import predict_news_relevance
+from app.services.ml.news_relevance_model_service import predict_news_relevance
 
 NEWS_API_BASE_URL = "https://newsapi.org/v2/everything"
 

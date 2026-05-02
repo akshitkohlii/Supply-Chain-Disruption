@@ -172,8 +172,13 @@ export default function DashboardPage() {
   );
 
   const isRailOpen = !!selectedAlert;
+  const hasDashboardData =
+    !!data.dashboardOverview ||
+    !!data.alertSummary ||
+    alerts.length > 0 ||
+    !!data.dashboardFilterOptions;
 
-  if (data.isLoading) {
+  if (data.isLoading && !hasDashboardData) {
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         <div className="relative z-50 shrink-0 border-b border-slate-800/80">

@@ -5,7 +5,7 @@ import joblib
 import pandas as pd
 
 from app.core.database import get_database
-from app.services.route_delay_model_service import predict_route_delay_hours
+from app.services.ml.route_delay_model_service import predict_route_delay_hours
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 MODEL_PATH = BASE_DIR / "data" / "models" / "disruption_model.pkl"

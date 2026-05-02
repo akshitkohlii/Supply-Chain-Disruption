@@ -1,8 +1,8 @@
 from typing import Any, Dict, List, Optional
 
 from app.core.database import get_database
-from app.services.mitigation_model_service import predict_mitigation_outcome
-from app.services.ml_service import predict_route_disruption
+from app.services.ml.mitigation_model_service import predict_mitigation_outcome
+from app.services.ml.ml_service import predict_route_disruption
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:

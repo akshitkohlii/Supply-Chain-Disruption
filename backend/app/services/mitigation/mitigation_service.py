@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from app.services.mitigation_ml_service import build_ml_mitigation_plan
+from app.services.ml.mitigation_ml_service import build_ml_mitigation_plan
 
 
 async def get_mitigation_plan(alert_id: str) -> Dict[str, Any]:

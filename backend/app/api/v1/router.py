@@ -1,17 +1,15 @@
 from fastapi import APIRouter
 
-from app.api.v1.suppliers import router as suppliers_router, supplier_ml_router
 from app.api.v1.alerts import router as alerts_router
-from app.api.v1.analytics import (
-    router as analytics_router,
-    dashboard_router,
-    logistics_router,
-    map_router,
-)
-from app.api.v1.signals import router as signals_router
-from app.api.v1.ml import router as ml_router
+from app.api.v1.analytics import router as analytics_router
+from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.emerging import emerging_ml_router, emerging_signals_router
-from app.api.v1.alerts import mitigation_router
+from app.api.v1.logistics import router as logistics_router
+from app.api.v1.map import router as map_router
+from app.api.v1.mitigation import router as mitigation_router
+from app.api.v1.ml import router as ml_router
+from app.api.v1.signals import router as signals_router
+from app.api.v1.suppliers import router as suppliers_router, supplier_ml_router
 
 api_router = APIRouter()
 

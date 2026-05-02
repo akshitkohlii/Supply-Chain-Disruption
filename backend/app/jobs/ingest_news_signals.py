@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.signal_service import ingest_news_signals_for_all_ports
+from app.services.signals.signal_service import ingest_news_signals_for_all_ports
 
 
 async def main():

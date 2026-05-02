@@ -78,6 +78,56 @@ let pollingStarted = false;
 let hasLoadedDashboard = false;
 let hasLoadedMidCards = false;
 let hasLoadedEmergingSignals = false;
+let subscriberCount = 0;
+let dashboardTimerId: number | null = null;
+let midCardsTimerId: number | null = null;
+let emergingSignalsTimerId: number | null = null;
+
+function clearPollingTimer(timerId: number | null) {
+  if (timerId !== null && typeof window !== "undefined") {
+    window.clearTimeout(timerId);
+  }
+}
+
+function stopPolling() {
+  clearPollingTimer(dashboardTimerId);
+  clearPollingTimer(midCardsTimerId);
+  clearPollingTimer(emergingSignalsTimerId);
+  dashboardTimerId = null;
+  midCardsTimerId = null;
+  emergingSignalsTimerId = null;
+  pollingStarted = false;
+}
+
+function scheduleDashboardLoad() {
+  if (!pollingStarted || typeof window === "undefined") {
+    return;
+  }
+  clearPollingTimer(dashboardTimerId);
+  dashboardTimerId = window.setTimeout(() => {
+    void loadDashboard();
+  }, DASHBOARD_REFRESH_MS);
+}
+
+function scheduleMidCardsLoad() {
+  if (!pollingStarted || typeof window === "undefined") {
+    return;
+  }
+  clearPollingTimer(midCardsTimerId);
+  midCardsTimerId = window.setTimeout(() => {
+    void loadMidCards();
+  }, DASHBOARD_REFRESH_MS);
+}
+
+function scheduleEmergingSignalsLoad() {
+  if (!pollingStarted || typeof window === "undefined") {
+    return;
+  }
+  clearPollingTimer(emergingSignalsTimerId);
+  emergingSignalsTimerId = window.setTimeout(() => {
+    void loadEmergingSignals();
+  }, DASHBOARD_REFRESH_MS);
+}
 
 function emitChange() {
   listeners.forEach((listener) => listener());
@@ -124,7 +174,7 @@ async function loadDashboard() {
     });
   } finally {
     updateDashboardState({ isLoading: false });
-    window.setTimeout(loadDashboard, DASHBOARD_REFRESH_MS);
+    scheduleDashboardLoad();
   }
 }
 
@@ -155,7 +205,7 @@ async function loadMidCards() {
     });
   } finally {
     updateDashboardState({ midLoading: false });
-    window.setTimeout(loadMidCards, DASHBOARD_REFRESH_MS);
+    scheduleMidCardsLoad();
   }
 }
 
@@ -177,7 +227,7 @@ async function loadEmergingSignals() {
     });
   } finally {
     updateDashboardState({ emergingSignalsLoading: false });
-    window.setTimeout(loadEmergingSignals, DASHBOARD_REFRESH_MS);
+    scheduleEmergingSignalsLoad();
   }
 }
 
@@ -193,9 +243,14 @@ function ensurePollingStarted() {
 }
 
 function subscribe(listener: () => void) {
+  subscriberCount += 1;
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+    subscriberCount = Math.max(0, subscriberCount - 1);
+    if (subscriberCount === 0) {
+      stopPolling();
+    }
   };
 }
 

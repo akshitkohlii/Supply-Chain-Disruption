@@ -1,21 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEventHandler } from "react";
 import {
   Area,
   AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import PageShell from "@/components/dashboard/PageShell";
-import PageHeader from "@/components/dashboard/PageHeader";
-import PageSection from "@/components/dashboard/PageSection";
-import Panel from "@/components/dashboard/Panel";
+import PageHeader from "@/components/shell/PageHeader";
+import PageSection from "@/components/shell/PageSection";
+import PageShell from "@/components/shell/PageShell";
+import Panel from "@/components/shell/Panel";
 import {
   getLanePressure,
   getLogisticsOverview,
@@ -24,9 +23,42 @@ import {
   type ApiLogisticsOverview,
   type ApiLogisticsTimeSeriesPoint,
 } from "@/lib/api";
+import {
+  glowResetButtonClass,
+  glowResetButtonShadowClass,
+} from "@/lib/ui";
 
 type SortMode = "pressure-desc" | "delay-desc" | "throughput-desc" | "shipments-desc";
 type FilterMode = "all" | "high-pressure" | "high-delay" | "low-throughput";
+type LaneChartDatum = {
+  laneKey: string;
+  lane: string;
+  originPort: string;
+  destinationPort: string;
+  pressure: number;
+  delay: number;
+  throughput: number;
+  shipmentCount: number;
+  fill: string;
+};
+
+type LanePressureBarShapeProps = {
+  fill?: string;
+  fillOpacity?: number;
+  filter?: string;
+  stroke?: string;
+  strokeWidth?: number | string;
+  opacity?: number | string;
+  className?: string;
+  onMouseEnter?: MouseEventHandler<SVGPathElement>;
+  onMouseLeave?: MouseEventHandler<SVGPathElement>;
+  payload?: LaneChartDatum;
+  radius?: number | [number, number, number, number];
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+};
 
 const DAY_LABELS: Record<string, string> = {
   Monday: "MON",
@@ -42,6 +74,7 @@ export default function LogisticsPage() {
   const [sortMode, setSortMode] = useState<SortMode>("pressure-desc");
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [selectedLane, setSelectedLane] = useState<string | null>(null);
+  const [hoveredLane, setHoveredLane] = useState<string | null>(null);
   const [overview, setOverview] = useState<ApiLogisticsOverview | null>(null);
   const [timeSeries, setTimeSeries] = useState<ApiLogisticsTimeSeriesPoint[]>([]);
   const [lanePressure, setLanePressure] = useState<ApiLanePressureItem[]>([]);
@@ -141,10 +174,14 @@ export default function LogisticsPage() {
 
   const laneChartData = useMemo(() => {
     return filteredLanes.slice(0, 8).map((item) => ({
+      laneKey: item.lane,
       lane: compactLaneLabel(item.origin_port, item.destination_port),
+      originPort: item.origin_port,
+      destinationPort: item.destination_port,
       pressure: Number(item.pressure_score.toFixed(1)),
       delay: Number(item.delay_hours.toFixed(1)),
       throughput: Number(item.throughput_pct.toFixed(1)),
+      shipmentCount: item.shipment_count,
       fill:
         item.lane === selectedLaneData?.lane
           ? "#f97316"
@@ -244,14 +281,14 @@ export default function LogisticsPage() {
                       setSortMode("pressure-desc");
                       setSelectedLane(lanePressure[0]?.lane ?? null);
                     }}
-                    className="rounded-2xl border border-slate-800/80 bg-slate-950/45 px-4 py-3 text-sm text-slate-300 transition hover:border-slate-700 hover:text-white"
+                    className={`rounded-2xl px-4 py-3 text-sm ${glowResetButtonClass} ${glowResetButtonShadowClass}`}
                   >
                     Reset View
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
-                  <div className="h-80 rounded-2xl border border-slate-800/70 bg-slate-950/55 p-4">
+                  <div className="flex h-105 flex-col rounded-2xl border border-slate-800/70 bg-slate-950/55 p-4">
                     <div className="mb-4 flex items-center justify-between">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
@@ -262,8 +299,13 @@ export default function LogisticsPage() {
                         </div>
                       </div>
                     </div>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={processedTimeSeries} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                    <div className="min-h-0 flex-1">
+                      <AreaChart
+                        responsive
+                        data={processedTimeSeries}
+                        style={{ width: "100%", height: "100%" }}
+                        margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                      >
                         <defs>
                           <linearGradient id="delayAreaFill" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#f97316" stopOpacity={0.28} />
@@ -274,6 +316,7 @@ export default function LogisticsPage() {
                         <XAxis dataKey="dayLabel" tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} axisLine={false} />
                         <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickLine={false} axisLine={false} width={34} />
                         <Tooltip
+                          cursor={{ fill: "transparent" }}
                           contentStyle={{
                             background: "rgba(2,6,23,0.96)",
                             border: "1px solid rgba(30,41,59,0.95)",
@@ -284,7 +327,7 @@ export default function LogisticsPage() {
                         <Area type="monotone" dataKey="delay" stroke="#f97316" fill="url(#delayAreaFill)" strokeWidth={2} />
                         <Area type="monotone" dataKey="throughput" stroke="#22d3ee" fill="transparent" strokeWidth={2} />
                       </AreaChart>
-                    </ResponsiveContainer>
+                    </div>
                   </div>
 
                   <div className="rounded-2xl border border-slate-800/70 bg-slate-950/55 p-4">
@@ -300,38 +343,102 @@ export default function LogisticsPage() {
                       Operational Pressure Index
                     </div>
                     <div className="mt-4 h-55">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={laneChartData} margin={{ top: 6, right: 4, left: 8, bottom: 8 }} barGap={10}>
-                          <CartesianGrid vertical={false} stroke="rgba(148,163,184,0.08)" />
-                          <XAxis
-                            dataKey="lane"
-                            tick={{ fill: "#94a3b8", fontSize: 10 }}
-                            tickLine={false}
-                            axisLine={false}
-                            interval={0}
-                            angle={-18}
-                            textAnchor="end"
-                            height={42}
-                          />
-                          <YAxis
-                            tick={{ fill: "#94a3b8", fontSize: 11 }}
-                            tickLine={false}
-                            axisLine={false}
-                            width={40}
-                            domain={[0, 100]}
-                            ticks={[0, 25, 50, 75, 100]}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              background: "rgba(2,6,23,0.96)",
-                              border: "1px solid rgba(30,41,59,0.95)",
-                              borderRadius: 16,
-                              color: "#e2e8f0",
-                            }}
-                          />
-                          <Bar dataKey="pressure" radius={[8, 8, 0, 0]} maxBarSize={58} />
-                        </BarChart>
-                      </ResponsiveContainer>
+                      <BarChart
+                        responsive
+                        data={laneChartData}
+                        style={{ width: "100%", height: "100%" }}
+                        margin={{ top: 6, right: 4, left: 8, bottom: 8 }}
+                        barGap={10}
+                        onMouseMove={(state: unknown) => {
+                          const nextLane = (
+                            state as { activePayload?: Array<{ payload?: LaneChartDatum }> } | undefined
+                          )?.activePayload?.[0]?.payload?.laneKey;
+                          setHoveredLane(typeof nextLane === "string" ? nextLane : null);
+                        }}
+                        onMouseLeave={() => setHoveredLane(null)}
+                      >
+                        <CartesianGrid vertical={false} stroke="rgba(148,163,184,0.08)" />
+                        <XAxis
+                          dataKey="lane"
+                          tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={false}
+                          interval={0}
+                          angle={-18}
+                          textAnchor="end"
+                          height={42}
+                        />
+                        <YAxis
+                          tick={{ fill: "#94a3b8", fontSize: 11 }}
+                          tickLine={false}
+                          axisLine={false}
+                          width={40}
+                          domain={[0, 100]}
+                          ticks={[0, 25, 50, 75, 100]}
+                        />
+                        <Tooltip
+                          cursor={<LanePressureCursor />}
+                          allowEscapeViewBox={{ x: true, y: true }}
+                          offset={18}
+                          position={{ x: 24, y: 12 }}
+                          wrapperStyle={{ pointerEvents: "none", zIndex: 30 }}
+                          content={<LanePressureTooltip />}
+                        />
+                        <defs>
+                          <filter id="laneColumnGlow" x="-60%" y="-10%" width="220%" height="140%">
+                            <feDropShadow
+                              dx="0"
+                              dy="0"
+                              stdDeviation="10"
+                              floodColor="#38bdf8"
+                              floodOpacity="0.22"
+                            />
+                            <feDropShadow
+                              dx="0"
+                              dy="0"
+                              stdDeviation="18"
+                              floodColor="#3b82f6"
+                              floodOpacity="0.12"
+                            />
+                          </filter>
+                          <filter id="laneBarGlow" x="-40%" y="-20%" width="180%" height="180%">
+                            <feDropShadow
+                              dx="0"
+                              dy="0"
+                              stdDeviation="6"
+                              floodColor="#38bdf8"
+                              floodOpacity="0.55"
+                            />
+                            <feDropShadow
+                              dx="0"
+                              dy="0"
+                              stdDeviation="12"
+                              floodColor="#3b82f6"
+                              floodOpacity="0.3"
+                            />
+                          </filter>
+                        </defs>
+                        <Bar
+                          dataKey="pressure"
+                          radius={[8, 8, 0, 0]}
+                          maxBarSize={58}
+                          activeBar={false}
+                          shape={(props) => {
+                            const lane = props.payload?.laneKey;
+                            const isHovered = lane != null && hoveredLane === lane;
+                            const isDimmed = lane != null && hoveredLane !== null && hoveredLane !== lane;
+
+                            return (
+                              <LanePressureBarShape
+                                {...props}
+                                fill={props.payload?.fill ?? props.fill}
+                                fillOpacity={isDimmed ? 0.24 : 1}
+                                filter={isHovered ? "url(#laneBarGlow)" : undefined}
+                              />
+                            );
+                          }}
+                        />
+                      </BarChart>
                     </div>
                   </div>
                 </div>
@@ -426,6 +533,165 @@ export default function LogisticsPage() {
 
 function compactLaneLabel(origin: string, destination: string) {
   return `${shortPort(origin)}-${shortPort(destination)}`;
+}
+
+function LanePressureCursor({
+  x = 0,
+  y = 0,
+  width = 0,
+  height = 0,
+}: {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}) {
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return (
+    <g filter="url(#laneColumnGlow)">
+      <rect
+        x={x + 4}
+        y={y + 2}
+        width={Math.max(0, width - 8)}
+        height={Math.max(0, height - 4)}
+        rx={18}
+        fill="rgba(56, 189, 248, 0.08)"
+        stroke="rgba(125, 211, 252, 0.16)"
+        strokeWidth={1}
+      />
+    </g>
+  );
+}
+
+function LanePressureTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: LaneChartDatum }>;
+}) {
+  if (!active || !payload?.length || !payload[0]?.payload) {
+    return null;
+  }
+
+  const item = payload[0].payload;
+  const pressureBand =
+    item.pressure >= 70 ? "Critical pressure" : item.pressure >= 45 ? "Watch lane" : "Stable lane";
+
+  return (
+    <div className="w-60 rounded-2xl border border-slate-700/55 bg-slate-950/45 px-3 py-3 shadow-[0_18px_40px_rgba(2,6,23,0.28)] backdrop-blur-sm">
+      <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+        Operational Pressure Index
+      </div>
+      <div className="mt-2 text-sm font-semibold text-white">
+        {item.lane}
+      </div>
+      <div className="mt-1 text-[11px] leading-5 text-slate-400">
+        {item.originPort} → {item.destinationPort}
+      </div>
+      <div className="mt-1 text-[11px] text-slate-500">
+        {pressureBand}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <TooltipMetric label="Pressure" value={`${item.pressure.toFixed(1)}`} tone="orange" />
+        <TooltipMetric label="Delay" value={`${item.delay.toFixed(1)}h`} tone="rose" />
+        <TooltipMetric label="Throughput" value={`${item.throughput.toFixed(1)}%`} tone="cyan" />
+        <TooltipMetric label="Shipments" value={`${item.shipmentCount}`} tone="slate" />
+      </div>
+    </div>
+  );
+}
+
+function LanePressureBarShape({
+  x = 0,
+  y = 0,
+  width = 0,
+  height = 0,
+  radius = [0, 0, 0, 0],
+  fill,
+  fillOpacity,
+  filter,
+  stroke,
+  strokeWidth,
+  opacity,
+  className,
+  payload,
+  onMouseEnter,
+  onMouseLeave,
+}: LanePressureBarShapeProps) {
+  void payload;
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  const [topLeft, topRight, bottomRight, bottomLeft] = Array.isArray(radius)
+    ? radius
+    : [radius, radius, radius, radius];
+  const right = x + width;
+  const bottom = y + height;
+  const safeTopLeft = Math.max(0, Math.min(topLeft, width / 2, height));
+  const safeTopRight = Math.max(0, Math.min(topRight, width / 2, height));
+  const safeBottomRight = Math.max(0, Math.min(bottomRight, width / 2, height));
+  const safeBottomLeft = Math.max(0, Math.min(bottomLeft, width / 2, height));
+
+  const d = [
+    `M ${x},${bottom - safeBottomLeft}`,
+    safeBottomLeft > 0 ? `Q ${x},${bottom} ${x + safeBottomLeft},${bottom}` : `L ${x},${bottom}`,
+    `L ${right - safeBottomRight},${bottom}`,
+    safeBottomRight > 0
+      ? `Q ${right},${bottom} ${right},${bottom - safeBottomRight}`
+      : `L ${right},${bottom}`,
+    `L ${right},${y + safeTopRight}`,
+    safeTopRight > 0 ? `Q ${right},${y} ${right - safeTopRight},${y}` : `L ${right},${y}`,
+    `L ${x + safeTopLeft},${y}`,
+    safeTopLeft > 0 ? `Q ${x},${y} ${x},${y + safeTopLeft}` : `L ${x},${y}`,
+    "Z",
+  ].join(" ");
+
+  return (
+    <path
+      d={d}
+      fill={fill}
+      fillOpacity={fillOpacity}
+      filter={filter}
+      stroke={stroke}
+      strokeWidth={strokeWidth}
+      opacity={opacity}
+      className={className}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    />
+  );
+}
+
+function TooltipMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "orange" | "rose" | "cyan" | "slate";
+}) {
+  const toneClass =
+    tone === "orange"
+      ? "text-orange-300"
+      : tone === "rose"
+      ? "text-rose-300"
+      : tone === "cyan"
+      ? "text-cyan-300"
+      : "text-slate-200";
+
+  return (
+    <div className="rounded-xl border border-slate-700/45 bg-slate-900/30 px-2.5 py-2">
+      <div className="text-[9px] uppercase tracking-[0.14em] text-slate-500">{label}</div>
+      <div className={`mt-1 text-sm font-medium ${toneClass}`}>{value}</div>
+    </div>
+  );
 }
 
 function shortPort(port: string) {

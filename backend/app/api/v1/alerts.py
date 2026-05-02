@@ -8,8 +8,7 @@ from app.schemas.alert import (
     AlertThresholdSettingsResponse,
     AlertThresholdSettingsUpdateRequest,
 )
-from app.schemas.mitigation import MitigationPlanResponse
-from app.services.alert_service import (
+from app.services.alerts.alert_service import (
     generate_alerts_from_snapshots,
     get_alert_threshold_settings,
     get_alert_summary as service_get_alert_summary,
@@ -17,10 +16,8 @@ from app.services.alert_service import (
     update_alert_threshold_settings,
     update_alert_status as service_update_alert_status,
 )
-from app.services.mitigation_service import get_mitigation_plan
 
 router = APIRouter()
-mitigation_router = APIRouter()
 
 
 @router.get("", response_model=list[AlertResponse])
@@ -45,11 +42,14 @@ async def get_alert_settings():
 
 @router.put("/settings", response_model=AlertThresholdSettingsResponse)
 async def put_alert_settings(payload: AlertThresholdSettingsUpdateRequest):
-    return await update_alert_threshold_settings(
-        critical_risk_threshold=payload.critical_risk_threshold,
-        warning_risk_threshold=payload.warning_risk_threshold,
-        regenerate_alerts=payload.regenerate_alerts,
-    )
+    try:
+        return await update_alert_threshold_settings(
+            critical_risk_threshold=payload.critical_risk_threshold,
+            warning_risk_threshold=payload.warning_risk_threshold,
+            regenerate_alerts=payload.regenerate_alerts,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.patch("/{alert_id}/status", response_model=AlertStatusUpdateResponse)
@@ -61,11 +61,3 @@ async def patch_alert_status(
         return await service_update_alert_status(alert_id=alert_id, status=status)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-
-
-@mitigation_router.get("/{alert_id}", response_model=MitigationPlanResponse)
-async def mitigation_plan(alert_id: str):
-    try:
-        return await get_mitigation_plan(alert_id)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build mitigation plan: {exc}")

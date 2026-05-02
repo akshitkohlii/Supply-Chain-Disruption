@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from app.core.database import get_database
-from app.services.port_service import get_active_ports
+from app.services.ports.port_service import get_active_ports
 
 _CACHE_TTL_SECONDS = 20
 _map_points_cache: dict[str, tuple[datetime, Any]] = {}

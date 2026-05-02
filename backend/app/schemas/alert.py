@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal
 
 
@@ -118,3 +118,9 @@ class AlertThresholdSettingsUpdateRequest(BaseModel):
     critical_risk_threshold: int = Field(ge=0, le=100)
     warning_risk_threshold: int = Field(ge=0, le=100)
     regenerate_alerts: bool = True
+
+    @model_validator(mode="after")
+    def validate_threshold_order(self):
+        if self.warning_risk_threshold >= self.critical_risk_threshold:
+            raise ValueError("warning_risk_threshold must be less than critical_risk_threshold")
+        return self

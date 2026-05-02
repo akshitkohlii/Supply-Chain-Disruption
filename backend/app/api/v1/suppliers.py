@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.services.supplier_service import (
+from app.services.suppliers.supplier_service import (
     get_all_suppliers,
     get_suppliers_overview,
     predict_supplier_disruption,

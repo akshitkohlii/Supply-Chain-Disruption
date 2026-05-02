@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.core.database import get_database
-from app.services.supplier_service import get_all_suppliers
-from app.services.weather_service import fetch_daily_forecast_for_location
+from app.services.signals.weather_service import fetch_daily_forecast_for_location
+from app.services.suppliers.supplier_service import get_all_suppliers
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:

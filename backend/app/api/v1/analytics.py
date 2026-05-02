@@ -7,54 +7,15 @@ from app.schemas.analytics import (
     LanePressureItemResponse,
     SupplierExposureItemResponse,
 )
-from app.schemas.dashboard import (
-    DashboardFilterOptionsResponse,
-    DashboardOverviewResponse,
-)
-from app.services.analytics_service import (
+from app.services.analytics.analytics_service import (
     get_analytics_forecast,
     get_analytics_overview,
     get_analytics_time_series,
     get_lane_pressure,
     get_supplier_exposure,
 )
-from app.services.dashboard_service import get_dashboard_overview
-from app.services.dashboard_service import get_dashboard_filter_options
-from app.services.logistics_service import (
-    get_logistics_overview,
-    get_logistics_timeseries,
-)
-from app.services.map_service import get_map_points
 
 router = APIRouter()
-dashboard_router = APIRouter()
-map_router = APIRouter()
-logistics_router = APIRouter()
-
-
-@dashboard_router.get("/overview", response_model=DashboardOverviewResponse)
-async def dashboard_overview():
-    return await get_dashboard_overview()
-
-
-@dashboard_router.get("/filter-options", response_model=DashboardFilterOptionsResponse)
-async def dashboard_filter_options():
-    return await get_dashboard_filter_options()
-
-
-@map_router.get("/points")
-async def map_points(limit: int = Query(default=500, ge=1, le=5000)):
-    return await get_map_points(limit=limit)
-
-
-@logistics_router.get("/overview")
-async def logistics_overview():
-    return await get_logistics_overview()
-
-
-@logistics_router.get("/timeseries")
-async def logistics_timeseries():
-    return await get_logistics_timeseries()
 
 
 @router.get("/overview", response_model=AnalyticsOverviewResponse)

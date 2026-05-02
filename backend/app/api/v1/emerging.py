@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.services.emerging_signal_service import (
+from app.services.signals.emerging_signal_service import (
     build_emerging_signals,
     get_emerging_signals,
     predict_emerging_signal,

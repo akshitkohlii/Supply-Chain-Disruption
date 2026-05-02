@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from app.core.database import get_database
-from app.services.port_congestion_model_service import predict_port_congestion_forecast
-from app.services.port_service import get_port_by_name
+from app.services.ml.port_congestion_model_service import predict_port_congestion_forecast
+from app.services.ports.port_service import get_port_by_name
 
 
 def clamp_score(value: float) -> int:

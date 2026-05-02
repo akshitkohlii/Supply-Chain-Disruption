@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.ml import ModelInfoResponse, RoutePredictionResponse
-from app.services.ml_service import get_model_info, predict_route_disruption
+from app.services.ml.ml_service import get_model_info, predict_route_disruption
 
 router = APIRouter()
 

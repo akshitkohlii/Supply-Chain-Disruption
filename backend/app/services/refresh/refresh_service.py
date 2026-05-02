@@ -2,17 +2,19 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from pymongo import ReplaceOne
+
 from app.core.config import settings
 from app.core.database import get_database
-from app.services.alert_service import generate_alerts_from_snapshots
-from app.services.emerging_signal_service import (
+from app.services.alerts.alert_service import generate_alerts_from_snapshots
+from app.services.ml.ml_service import predict_route_disruption
+from app.services.ml.risk_engine import get_risk_level
+from app.services.signals.emerging_signal_service import (
     build_emerging_signals,
     get_route_emerging_impact,
 )
-from app.services.ml_service import predict_route_disruption
-from app.services.port_congestion_service import ingest_port_congestion_signals
-from app.services.risk_engine import get_risk_level
-from app.services.signal_service import (
+from app.services.signals.port_congestion_service import ingest_port_congestion_signals
+from app.services.signals.signal_service import (
     ingest_news_signals_for_all_ports,
     ingest_weather_signals_for_all_ports,
 )
@@ -201,6 +203,7 @@ async def refresh_routes_master() -> Dict[str, Any]:
 
     docs = await db.shipments_raw.aggregate(pipeline).to_list(length=100000)
     output_docs: List[Dict[str, Any]] = []
+    route_ids: List[str] = []
     now = datetime.now(timezone.utc)
 
     for doc in docs:
@@ -234,20 +237,33 @@ async def refresh_routes_master() -> Dict[str, Any]:
                 "updated_at": now,
             }
         )
+        route_ids.append(key)
 
-    await db.routes_master.delete_many({})
     if output_docs:
-        await db.routes_master.insert_many(output_docs)
+        await db.routes_master.bulk_write(
+            [
+                ReplaceOne({"_id": doc["_id"]}, doc, upsert=True)
+                for doc in output_docs
+            ],
+            ordered=False,
+        )
 
-    return {"success": True, "routes_created": len(output_docs)}
+    stale_filter = {"_id": {"$nin": route_ids}} if route_ids else {}
+    delete_result = await db.routes_master.delete_many(stale_filter)
+
+    return {
+        "success": True,
+        "routes_created": len(output_docs),
+        "routes_removed": delete_result.deleted_count,
+    }
 
 
 async def refresh_route_risk_snapshots() -> Dict[str, Any]:
     db = get_database()
-
-    await db.risk_snapshots.delete_many({})
     routes = await db.routes_master.find({"active": {"$ne": False}}).to_list(length=100000)
     inserted = 0
+    snapshot_docs: List[Dict[str, Any]] = []
+    snapshot_ids: List[str] = []
 
     for route in routes:
         origin = route.get("origin_port")
@@ -319,6 +335,7 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
             drivers.append("emerging")
 
         snapshot = {
+            "_id": str(route_key),
             "entity_type": "route",
             "entity_id": route_key,
             "route_key": route_key,
@@ -345,10 +362,28 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
             "snapshot_time": datetime.now(timezone.utc),
         }
 
-        await db.risk_snapshots.insert_one(snapshot)
+        snapshot_docs.append(snapshot)
+        snapshot_ids.append(str(route_key))
         inserted += 1
 
-    return {"success": True, "routes_processed": len(routes), "snapshots_inserted": inserted}
+    if snapshot_docs:
+        await db.risk_snapshots.bulk_write(
+            [
+                ReplaceOne({"_id": doc["_id"]}, doc, upsert=True)
+                for doc in snapshot_docs
+            ],
+            ordered=False,
+        )
+
+    stale_filter = {"_id": {"$nin": snapshot_ids}} if snapshot_ids else {}
+    delete_result = await db.risk_snapshots.delete_many(stale_filter)
+
+    return {
+        "success": True,
+        "routes_processed": len(routes),
+        "snapshots_inserted": inserted,
+        "snapshots_removed": delete_result.deleted_count,
+    }
 
 
 async def refresh_derived_state() -> Dict[str, Any]:

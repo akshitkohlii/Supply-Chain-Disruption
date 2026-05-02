@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 
-from app.services.signal_service import (
+from app.services.signals.signal_service import (
     get_latest_news_signals,
     get_latest_weather_signals,
     ingest_news_signals_for_all_ports,

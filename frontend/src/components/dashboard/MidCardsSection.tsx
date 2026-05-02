@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import Panel from "./Panel";
+import Panel from "@/components/shell/Panel";
 
 import type {
   ApiAnalyticsOverview,

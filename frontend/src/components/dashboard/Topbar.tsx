@@ -2,7 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bell, Globe2, UserCircle2, X } from "lucide-react";
+import { Bell, Globe2, X } from "lucide-react";
 import type { AlertItem } from "@/lib/mappers";
 import TopPill from "./ui/TopPill";
 
@@ -178,10 +178,6 @@ export default function Topbar({
               </div>
             )}
           </div>
-
-          <button className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/80 text-slate-300 transition hover:text-white">
-            <UserCircle2 className="h-5 w-5" />
-          </button>
         </div>
       </div>
     </header>

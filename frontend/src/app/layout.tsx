@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import "./globals.css";
-import Sidebar from "@/components/dashboard/Sidebar";
+import Sidebar from "@/components/navigation/Sidebar";
 
 export const metadata: Metadata = {
   title: "Supply Chain Risk Dashboard",

@@ -3,9 +3,15 @@ from typing import Any, Dict, List, Optional
 
 from app.core.database import get_database
 from app.core.config import settings
-from app.services.port_service import get_active_ports
-from app.services.news_service import fetch_news_for_supplier, normalize_news_signal
-from app.services.weather_service import extract_weather_metrics, fetch_weather_for_location
+from app.services.ports.port_service import get_active_ports
+from app.services.signals.news_service import (
+    fetch_news_for_supplier,
+    normalize_news_signal,
+)
+from app.services.signals.weather_service import (
+    extract_weather_metrics,
+    fetch_weather_for_location,
+)
 
 
 def _port_to_news_entity(port: Dict[str, Any]) -> Dict[str, Any]:

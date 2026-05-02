@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from app.core.database import get_database
-from app.services.supplier_service import predict_supplier_disruption
+from app.services.suppliers.supplier_service import predict_supplier_disruption
 
 
 async def main():

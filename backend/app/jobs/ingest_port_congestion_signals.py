@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.port_congestion_service import ingest_port_congestion_signals
+from app.services.signals.port_congestion_service import ingest_port_congestion_signals
 
 
 async def main():

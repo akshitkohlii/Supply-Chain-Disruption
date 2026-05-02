@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AIMitigationEngine from "./AIMitigationEngine";
 import MitigationScenarioComparison from "./MitigationScenarioComparison";
-import Panel from "./Panel";
+import Panel from "@/components/shell/Panel";
 import { getMitigationPlan, type ApiMitigationPlan } from "@/lib/api";
 
 type Scenario = {

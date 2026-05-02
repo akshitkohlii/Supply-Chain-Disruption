@@ -1,6 +1,6 @@
 import asyncio
 
-from app.services.alert_service import generate_alerts_from_snapshots
+from app.services.alerts.alert_service import generate_alerts_from_snapshots
 
 
 async def generate_alerts():

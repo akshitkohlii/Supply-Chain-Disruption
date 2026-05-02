@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import connect_to_mongo, close_mongo_connection
-from app.services.refresh_service import auto_refresh_loop
+from app.services.refresh.refresh_service import auto_refresh_loop
 
 app = FastAPI(title="SCDEWS Backend")
 
