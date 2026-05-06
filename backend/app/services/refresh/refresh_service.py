@@ -24,6 +24,7 @@ _last_news_refresh_at: datetime | None = None
 _last_weather_refresh_at: datetime | None = None
 ACTIVE_SHIPMENT_STATUSES = {"in_transit", "customs_hold", "port_hold"}
 REFRESH_STATE_SETTINGS_ID = "derived-signal-refresh-state"
+SNAPSHOT_RETENTION_DAYS = 30
 
 
 def _clamp_score(value: float) -> int:
@@ -263,12 +264,15 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
     routes = await db.routes_master.find({"active": {"$ne": False}}).to_list(length=100000)
     inserted = 0
     snapshot_docs: List[Dict[str, Any]] = []
-    snapshot_ids: List[str] = []
+    snapshot_time = datetime.now(timezone.utc)
+    retention_cutoff = snapshot_time - timedelta(days=SNAPSHOT_RETENTION_DAYS)
 
     for route in routes:
         origin = route.get("origin_port")
         destination = route.get("destination_port")
         route_key = route.get("route_key")
+        snapshot_route_key = str(route_key or _route_key(origin, destination))
+        snapshot_day = snapshot_time.date().isoformat()
 
         origin_weather = await _latest_signal(origin, "weather_signals")
         destination_weather = await _latest_signal(destination, "weather_signals")
@@ -335,10 +339,10 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
             drivers.append("emerging")
 
         snapshot = {
-            "_id": str(route_key),
+            "_id": f"{snapshot_route_key}::{snapshot_day}",
             "entity_type": "route",
-            "entity_id": route_key,
-            "route_key": route_key,
+            "entity_id": snapshot_route_key,
+            "route_key": snapshot_route_key,
             "origin_port": origin,
             "destination_port": destination,
             "scores": {
@@ -359,11 +363,10 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
             "emerging_impact": emerging_impact,
             "risk_level": get_risk_level(final_risk),
             "top_drivers": drivers,
-            "snapshot_time": datetime.now(timezone.utc),
+            "snapshot_time": snapshot_time,
         }
 
         snapshot_docs.append(snapshot)
-        snapshot_ids.append(str(route_key))
         inserted += 1
 
     if snapshot_docs:
@@ -375,8 +378,12 @@ async def refresh_route_risk_snapshots() -> Dict[str, Any]:
             ordered=False,
         )
 
-    stale_filter = {"_id": {"$nin": snapshot_ids}} if snapshot_ids else {}
-    delete_result = await db.risk_snapshots.delete_many(stale_filter)
+    delete_result = await db.risk_snapshots.delete_many(
+        {
+            "entity_type": "route",
+            "snapshot_time": {"$lt": retention_cutoff},
+        }
+    )
 
     return {
         "success": True,

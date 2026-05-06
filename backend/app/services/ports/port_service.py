@@ -69,6 +69,7 @@ async def get_active_ports() -> List[Dict[str, Any]]:
             "origin_country": 1,
             "origin_lat": 1,
             "origin_lng": 1,
+            "transit_port": 1,
             "destination_port": 1,
             "destination_country": 1,
             "destination_lat": 1,
@@ -85,7 +86,7 @@ async def get_active_ports() -> List[Dict[str, Any]]:
     for doc in docs:
         origin_port = _clean_str(doc.get("origin_port") or doc.get("tier1_origin_port"))
         destination_port = _clean_str(doc.get("destination_port") or doc.get("tier3_destination_port"))
-        transit_port = _clean_str(doc.get("tier2_transit_port"))
+        transit_port = _clean_str(doc.get("transit_port") or doc.get("tier2_transit_port"))
 
         origin_country = _clean_str(doc.get("origin_country") or doc.get("supplier_country"))
         destination_country = _clean_str(doc.get("destination_country") or doc.get("supplier_country"))

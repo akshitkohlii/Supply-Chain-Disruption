@@ -50,67 +50,50 @@ export default function AnalyticsPage() {
   const [focusMode, setFocusMode] = useState<FocusMode>("all");
   const [selectedPort, setSelectedPort] = useState("");
   const [selectedLane, setSelectedLane] = useState("");
+  const initialTimeSeriesCache =
+    getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(buildAnalyticsTimeSeriesPath()) ?? [];
   const [overview, setOverview] = useState<ApiAnalyticsOverview | null>(() =>
     getCachedApiData<ApiAnalyticsOverview>(ANALYTICS_OVERVIEW_PATH) ?? null
   );
-  const [timeSeries, setTimeSeries] = useState<ApiAnalyticsTimeSeriesPoint[]>(() => {
-    return (
-      getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(buildAnalyticsTimeSeriesPath()) ?? []
-    );
-  });
+  const [timeSeries, setTimeSeries] = useState<ApiAnalyticsTimeSeriesPoint[]>(initialTimeSeriesCache);
   const [supplierExposure, setSupplierExposure] = useState<ApiSupplierExposureItem[]>(() =>
     getCachedApiData<ApiSupplierExposureItem[]>(SUPPLIER_EXPOSURE_PATH) ?? []
   );
   const [lanePressure, setLanePressure] = useState<ApiLanePressureItem[]>(() =>
     getCachedApiData<ApiLanePressureItem[]>(LANE_PRESSURE_PATH) ?? []
   );
-  const [isLoading, setIsLoading] = useState(() => {
-    const hasCachedOverview = !!getCachedApiData<ApiAnalyticsOverview>(ANALYTICS_OVERVIEW_PATH);
-    const hasCachedTimeSeries =
-      !!getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(buildAnalyticsTimeSeriesPath())?.length;
-    const hasCachedSupplierExposure =
-      !!getCachedApiData<ApiSupplierExposureItem[]>(SUPPLIER_EXPOSURE_PATH)?.length;
-    const hasCachedLanePressure =
-      !!getCachedApiData<ApiLanePressureItem[]>(LANE_PRESSURE_PATH)?.length;
-
-    return !(
-      hasCachedOverview ||
-      hasCachedTimeSeries ||
-      hasCachedSupplierExposure ||
-      hasCachedLanePressure
-    );
-  });
+  const [isLoading, setIsLoading] = useState(() => initialTimeSeriesCache.length === 0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const cachedOverview = getCachedApiData<ApiAnalyticsOverview>(ANALYTICS_OVERVIEW_PATH);
-    const cachedTimeSeries =
-      getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(
-        buildAnalyticsTimeSeriesPath({
-          port: selectedPort || undefined,
-          lane: selectedLane || undefined,
-        })
-      ) ?? [];
-    const cachedSupplierExposure =
-      getCachedApiData<ApiSupplierExposureItem[]>(SUPPLIER_EXPOSURE_PATH) ?? [];
-    const cachedLanePressure =
-      getCachedApiData<ApiLanePressureItem[]>(LANE_PRESSURE_PATH) ?? [];
-    const hasCachedData =
-      !!cachedOverview ||
-      cachedTimeSeries.length > 0 ||
-      cachedSupplierExposure.length > 0 ||
-      cachedLanePressure.length > 0;
+    const cachedTimeSeries = getCachedApiData<ApiAnalyticsTimeSeriesPoint[]>(
+      buildAnalyticsTimeSeriesPath({
+        port: selectedPort || undefined,
+        lane: selectedLane || undefined,
+      })
+    );
+    const cachedSupplierExposure = getCachedApiData<ApiSupplierExposureItem[]>(
+      SUPPLIER_EXPOSURE_PATH
+    );
+    const cachedLanePressure = getCachedApiData<ApiLanePressureItem[]>(LANE_PRESSURE_PATH);
 
     if (cachedOverview) {
       setOverview(cachedOverview);
     }
-    setTimeSeries(cachedTimeSeries);
-    setSupplierExposure(cachedSupplierExposure);
-    setLanePressure(cachedLanePressure);
+    if (cachedTimeSeries) {
+      setTimeSeries(cachedTimeSeries);
+    }
+    if (cachedSupplierExposure) {
+      setSupplierExposure(cachedSupplierExposure);
+    }
+    if (cachedLanePressure) {
+      setLanePressure(cachedLanePressure);
+    }
 
     async function loadAnalytics() {
-      setIsLoading(!hasCachedData);
+      setIsLoading(!cachedTimeSeries?.length);
       setError(null);
 
       try {
@@ -227,12 +210,6 @@ export default function AnalyticsPage() {
     ];
   }, [timeSeriesRows]);
 
-  const hasAnalyticsData =
-    !!overview ||
-    timeSeriesRows.length > 0 ||
-    supplierExposureRows.length > 0 ||
-    logisticsRows.length > 0;
-
   return (
     <PageShell
       header={
@@ -333,7 +310,7 @@ export default function AnalyticsPage() {
             className="xl:col-span-8"
             bodyClassName="h-full"
           >
-            {isLoading && !hasAnalyticsData ? (
+            {isLoading && !timeSeriesRows.length ? (
               <AnalyticsEmptyState message="Loading time-series analysis..." isLoading />
             ) : error ? (
               <AnalyticsEmptyState message={error} isError />
